@@ -8,7 +8,7 @@ Extensions for eScholarship-style topic branches.
 import re
 from xml import sax
 from StringIO import StringIO
-from mercurial import commands, hg, patch, util
+from mercurial import commands, extensions, hg, patch, util
 from mercurial.node import nullid
 
 #################################################################################
@@ -28,9 +28,9 @@ def checkTabs(ui, repo, node):
   fp.close()
   for line in result.split("\n"):
     if re.match("^\+\s*\t", line):
-      return ruleError(ui, "Coding standard does not allow tab characters to be introduced.\n" +
-              "Please set your editor to expand tabs to spaces, then search for\n" +
-              "all tabs and replace them.\n" +
+      return ruleError(ui, "Coding standard does not allow tab characters to be introduced.\n"
+              "Please set your editor to expand tabs to spaces, then search for\n"
+              "all tabs and replace them.\n"
               "Offending line:\n" + line)
 
   return True
@@ -101,6 +101,9 @@ def checkBranch(ui, repo, node, parent1, parent2):
       # For instance, if we're trying to merge to stage, find the last rev that was merged
       # to dev.
       #
+      # TODO: I think this *will* work when processing multiple changegroups during a push,
+      #       but gotta test that.
+      #
       branchMap = repo.branchmap()
       assert reqPred in branchMap
       reqHead = branchMap[reqPred][0]
@@ -142,25 +145,42 @@ def pretxncommit(ui, repo, node, parent1, parent2, **kwargs):
   return False # no problems found
 
 
-def printparents(ui, repo, node, **opts):
-    # The doc string below will show up in hg help
-    """Print parent information"""
+#################################################################################
+def tbranch(orig, ui, *args, **kwargs):
+  print "tbranch command"
 
-    # repo can be indexed based on tags, an sha1, or a revision number
-    ctx = repo[node]
-    parents = ctx.parents()
-    if len(parents) < 2:
-      parents.append(None)
 
-    if opts['short']:
-        # the string representation of a context returns a smaller portion of the sha1
-        ui.write("short %s %s\n" % (parents[0], parents[1]))
-    elif opts['long']:
-        # the hex representation of a context returns the full sha1
-        ui.write("long %s %s\n" % (parents[0].hex(), parents[1].hex()))
-    else:
-        ui.write("default %s %s\n" % (parents[0], parents[1]))
+#################################################################################
+def replacedCommand(orig, ui, *args, **kwargs):
+  """ This is called for commands our extension replaces, like "branch". We
+      print an informative message, or if the "--tforce" option is specified,
+      we go ahead and run the original commands. """
 
+  tforce = kwargs.pop('tforce', None)
+  if tforce:
+    return orig(ui, *args, **kwargs)
+  ui.warn("Command replaced by 'topic-branch' extension.\n"
+          "Use tbranch/tbranches/tpush, or else specify --tforce if you really want the original.\n")
+  return 1
+
+
+#################################################################################
+def uisetup(ui):
+  """ Called by Mercurial to give us a chance to manipulate the ui. """
+
+  # Set replaced commands to print a message unless forced.
+  overrideOpt = [('', 'tforce', None, "override check and run original hg command")]
+  entry = extensions.wrapcommand(commands.table, 'branch', replacedCommand)
+  entry[1].extend(overrideOpt)
+  entry = extensions.wrapcommand(commands.table, 'branches', replacedCommand)
+  entry[1].extend(overrideOpt)
+  entry = extensions.wrapcommand(commands.table, 'push', replacedCommand)
+  entry[1].extend(overrideOpt)
+
+
+#################################################################################
+# Table of commands we're adding.
+#
 cmdtable = {
     # cmd name        function call
     "print-parents": (printparents,
@@ -168,6 +188,9 @@ cmdtable = {
                      # flag options.
                      [('s', 'short', None, 'print short form'),
                       ('l', 'long', None, 'print long form')],
-                     "[options] REV")
+                     "[options] REV"),
+    "tbranch":       (tbranch,
+                      [('s', 'short', None, "short form")],
+                      "")
 }
 
