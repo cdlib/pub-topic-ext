@@ -8,8 +8,8 @@ Extensions for eScholarship-style topic branches.
 import re
 from xml import sax
 from StringIO import StringIO
-from mercurial import commands, extensions, hg, patch, util
-from mercurial.node import nullid
+from mercurial import cmdutil, commands, extensions, hg, patch, util
+from mercurial.node import nullid, nullrev
 
 #################################################################################
 def ruleError(ui, message):
@@ -146,8 +146,143 @@ def pretxncommit(ui, repo, node, parent1, parent2, **kwargs):
 
 
 #################################################################################
+def revsOnBranch(repo, branch):
+  """ Yield all revisions of the given branch, in topoligical order. """
+
+  visit = repo.branchheads(branch, closed = True)
+  while visit:
+    p = visit.pop()
+    if type(p) == str:
+      p = repo[p]
+    if p.branch() != branch:
+      continue
+    visit.extend(p.parents())
+    yield p
+
+
+#################################################################################
+def calcBranchState(repo, branch, ctx):
+  """ Figure out whether the given branch is local, or has been merged to
+      dev/stage/prod. """
+
+  # Find all the revs in this feature branch
+  featureRevs = list(revsOnBranch(repo, branch))
+
+
+  # Now check for merges to dev, stage, and prod
+  states = {ctx: 'local'}
+  for mainBr in ('dev', 'stage', 'prod'):
+    found = None
+    for p in revsOnBranch(repo, mainBr):
+      for pp in p.parents():
+        if pp in featureRevs:
+          found = pp
+      if found:
+        states[found] = mainBr
+        break
+
+  # Make the final textual version
+  outList = []
+  for (p, state) in states.iteritems():
+    if p != ctx:
+      state += "(%d)" % int(p)
+    if p in [repo[p] for p in repo.dirstate.parents()]:
+      state = "*" + state
+    outList.append(state)
+
+  return ", ".join(outList)
+
+
+#################################################################################
 def tbranch(orig, ui, *args, **kwargs):
   print "tbranch command"
+
+
+#################################################################################
+def printColumns(ui, colNames, rows):
+  """ Print columnar data. """
+
+  # Add column names at the top
+  rows.insert(0, colNames)
+
+  # Determine the max size of each column
+  nColumns = len(colNames)
+  colSize = [0] * nColumns
+  for tup in rows:
+    colSize = [max(colSize[i], len(str(tup[i]))) for i in range(nColumns)]
+
+  # Add a separator for the column names
+  rows.insert(1, ["-" * colSize[i] for i in range(nColumns)])
+
+  # And print the whole thing
+  ui.status("\n")
+  for tup in rows:
+    ui.status("  ".join(["%-*s" % (colSize[i], str(tup[i])) for i in range(nColumns)]) + "\n")
+  ui.status("\n")
+
+
+#################################################################################
+def tbranches(ui, repo, *args, **kwargs):
+  """ Print out the currently open topic branches. """
+
+  # Process each branch
+  toPrint = []
+  for tag, node in repo.branchtags().items():
+
+    # Skip dev/stage/prod
+    if tag in ('dev', 'stage', 'prod'):
+      continue
+
+    # Skip closed branches
+    hn = repo.lookup(node)
+    if not hn in repo.branchheads(tag, closed=False):
+      continue
+
+    # Determine all the field values we're going to print
+    ctx = repo[hn]
+    user = util.shortuser(ctx.user())
+    date = util.shortdate(ctx.date())
+    branchState = calcBranchState(repo, tag, ctx)
+
+    descrip = ctx.description().splitlines()[0].strip()
+    if len(descrip) > 60:
+      descrip = descrip[0:57] + "..."
+
+    toPrint.append((tag, user, date, branchState, descrip))
+
+  # Now print in order by reverse date
+  toPrint.sort(key=lambda a:a[2], reverse=True)
+
+  printColumns(ui, ('Branch', 'User', 'Date', 'State', 'Description'), toPrint)
+
+
+#################################################################################
+def tlog(ui, repo, *pats, **opts):
+  """ show revision history of the current branch. """
+
+  curBranch = repo.dirstate.branch()
+
+  toPrint = []
+
+  for id in repo:
+    ctx = repo[id]
+    kind = None
+    if ctx.branch() == curBranch:
+      kind = 'local'
+    elif ctx.parents() and ctx.parents()[0].branch() == curBranch:
+      kind = ctx.branch()
+    elif len(ctx.parents()) > 1 and ctx.parents()[1].branch() == curBranch:
+      kind = ctx.branch()
+
+    if kind:
+      user = util.shortuser(ctx.user())
+      date = util.shortdate(ctx.date())
+      descrip = ctx.description().splitlines()[0].strip()
+      if len(descrip) > 60: descrip = descrip[0:57] + "..."
+      toPrint.append((int(ctx), kind, user, date, descrip))
+
+  printColumns(ui, ('Rev num', 'Target', 'User', 'Date', 'Description'), toPrint)
+
 
 
 #################################################################################
@@ -169,28 +304,31 @@ def uisetup(ui):
   """ Called by Mercurial to give us a chance to manipulate the ui. """
 
   # Set replaced commands to print a message unless forced.
-  overrideOpt = [('', 'tforce', None, "override check and run original hg command")]
-  entry = extensions.wrapcommand(commands.table, 'branch', replacedCommand)
-  entry[1].extend(overrideOpt)
-  entry = extensions.wrapcommand(commands.table, 'branches', replacedCommand)
-  entry[1].extend(overrideOpt)
-  entry = extensions.wrapcommand(commands.table, 'push', replacedCommand)
-  entry[1].extend(overrideOpt)
+  if False:
+    overrideOpt = [('', 'tforce', None, "override check and run original hg command")]
+    entry = extensions.wrapcommand(commands.table, 'branch', replacedCommand)
+    entry[1].extend(overrideOpt)
+    entry = extensions.wrapcommand(commands.table, 'branches', replacedCommand)
+    entry[1].extend(overrideOpt)
+    entry = extensions.wrapcommand(commands.table, 'push', replacedCommand)
+    entry[1].extend(overrideOpt)
 
 
 #################################################################################
 # Table of commands we're adding.
 #
 cmdtable = {
-    # cmd name        function call
-    "print-parents": (printparents,
-                     # see mercurial/fancyopts.py for all of the command
-                     # flag options.
-                     [('s', 'short', None, 'print short form'),
-                      ('l', 'long', None, 'print long form')],
-                     "[options] REV"),
-    "tbranch":       (tbranch,
-                      [('s', 'short', None, "short form")],
-                      "")
+    "tbranch|tb":    (tbranch,
+                      [],
+                      ""),
+
+    "tbranches|tbs": (tbranches,
+                      [],
+                      ""),
+
+    "tlog":          (tlog,
+                      [] + commands.templateopts,
+                      ""),
+
 }
 
