@@ -150,12 +150,19 @@ def revsOnBranch(repo, branch):
   """ Yield all revisions of the given branch, in topoligical order. """
 
   visit = repo.branchheads(branch, closed = True)
+  seen = set()
   while visit:
     p = visit.pop()
+
+    if p in seen:
+      continue
+    seen.add(p)
+
     if type(p) == str:
       p = repo[p]
     if p.branch() != branch:
       continue
+
     visit.extend(p.parents())
     yield p
 
@@ -168,9 +175,13 @@ def calcBranchState(repo, branch, ctx):
   # Find all the revs in this feature branch
   featureRevs = list(revsOnBranch(repo, branch))
 
+  # Detect if the branch has been closed
+  if 'close' in ctx.changeset()[5]:
+    states = {ctx: 'closed'}
+  else:
+    states = {ctx: 'local'}
 
   # Now check for merges to dev, stage, and prod
-  states = {ctx: 'local'}
   for mainBr in ('dev', 'stage', 'prod'):
     found = None
     for p in revsOnBranch(repo, mainBr):
@@ -255,7 +266,7 @@ def topicBranches(repo, closed = False):
   for tag, node in repo.branchtags().items():
 
     # Skip dev/stage/prod
-    if tag in ('dev', 'stage', 'prod'):
+    if tag in ('default', 'dev', 'stage', 'prod'):
       continue
 
     # Skip closed branches if requested
@@ -282,9 +293,11 @@ def topicBranchNames(repo, closed = False):
 def tbranches(ui, repo, *args, **kwargs):
   """ show recent activity on the currently open topic branches. """
 
+  closed = kwargs.get('closed', False)
+
   # Process each branch
   toPrint = []
-  for (branch, ctx) in topicBranches(repo):
+  for (branch, ctx) in topicBranches(repo, closed):
 
     # Determine all the field values we're going to print
     user = util.shortuser(ctx.user())
@@ -374,7 +387,7 @@ cmdtable = {
                       ""),
 
     "tbranches|tbs": (tbranches,
-                      [],
+                      [('c', 'closed', None, "include closed branches")],
                       ""),
 
     "tlog":          (tlog,
