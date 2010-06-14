@@ -310,7 +310,7 @@ def tbranches(ui, repo, *args, **kwargs):
 
     toPrint.append((branch, user, date, branchState, descrip))
 
-  printColumns(ui, ('Branch', 'User', 'Date', 'State', 'Description'), toPrint)
+  printColumns(ui, ('Branch', 'Who', 'When', 'Where', 'Description'), toPrint)
 
 
 #################################################################################
@@ -318,7 +318,7 @@ def tlog(ui, repo, *pats, **opts):
   """ show revision history of the current branch (or all branches). """
 
   if opts['all']:
-    branches = topicBranchNames(repo)
+    branches = topicBranchNames(repo, opts.get('closed', False))
   else:
     branches = [repo.dirstate.branch()]
 
@@ -334,20 +334,23 @@ def tlog(ui, repo, *pats, **opts):
       ctx = repo[id]
       kind = None
       if ctx.branch() == branch:
-        kind = 'local'
+        kind = 'closed' if 'close' in ctx.changeset()[5] else 'local'
       elif ctx.parents() and ctx.parents()[0].branch() == branch:
         kind = ctx.branch()
       elif len(ctx.parents()) > 1 and ctx.parents()[1].branch() == branch:
         kind = ctx.branch()
+      
+      if kind and ctx in [repo[p] for p in repo.dirstate.parents()]:
+        kind = "*" + kind
 
       if kind:
         user = util.shortuser(ctx.user())
         date = util.shortdate(ctx.date())
         descrip = ctx.description().splitlines()[0].strip()
         if len(descrip) > 60: descrip = descrip[0:57] + "..."
-        toPrint.append((int(ctx), kind, user, date, descrip))
+        toPrint.append((int(ctx), user, date, kind, descrip))
 
-    printColumns(ui, ('Rev num', 'Target', 'User', 'Date', 'Description'), toPrint, indent=4)
+    printColumns(ui, ('Rev num', 'Who', 'When', 'Where', 'Description'), toPrint, indent=4)
 
 #################################################################################
 def replacedCommand(orig, ui, *args, **kwargs):
@@ -391,7 +394,9 @@ cmdtable = {
                       ""),
 
     "tlog":          (tlog,
-                      [('a', 'all', None, "all topic branches, not just current")] + commands.templateopts,
+                      [('a', 'all', None, "all topic branches, not just current"),
+                       ('c', 'closed', None, "include closed branches")] \
+                       + commands.templateopts,
                       ""),
 
 }
