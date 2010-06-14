@@ -199,7 +199,7 @@ def tbranch(orig, ui, *args, **kwargs):
 
 
 #################################################################################
-def printColumns(ui, colNames, rows):
+def printColumns(ui, colNames, rows, indent=0):
   """ Print columnar data. """
 
   # Add column names at the top
@@ -217,16 +217,17 @@ def printColumns(ui, colNames, rows):
   # And print the whole thing
   ui.status("\n")
   for tup in rows:
-    ui.status("  ".join(["%-*s" % (colSize[i], str(tup[i])) for i in range(nColumns)]) + "\n")
+    ui.status(" "*indent + ("  ".join(["%-*s" % (colSize[i], str(tup[i])) for i in range(nColumns)]) + "\n"))
   ui.status("\n")
 
 
 #################################################################################
-def tbranches(ui, repo, *args, **kwargs):
-  """ Print out the currently open topic branches. """
+def topicBranches(repo):
+  """ Get a list of the topic branches, ordered by descending date of last change. 
+      Each list entry is a tuple (branchname, headCtx) """
 
   # Process each branch
-  toPrint = []
+  result = []
   for tag, node in repo.branchtags().items():
 
     # Skip dev/stage/prod
@@ -239,19 +240,30 @@ def tbranches(ui, repo, *args, **kwargs):
       continue
 
     # Determine all the field values we're going to print
-    ctx = repo[hn]
+    result.append((tag, repo[hn]))
+
+  result.sort(lambda a,b: (a[1].date() < b[1].date()) - (a[1].date() > b[1].date()))
+  return result
+
+
+#################################################################################
+def tbranches(ui, repo, *args, **kwargs):
+  """ Print out the currently open topic branches. """
+
+  # Process each branch
+  toPrint = []
+  for (branch, ctx) in topicBranches(repo):
+
+    # Determine all the field values we're going to print
     user = util.shortuser(ctx.user())
     date = util.shortdate(ctx.date())
-    branchState = calcBranchState(repo, tag, ctx)
+    branchState = calcBranchState(repo, branch, ctx)
 
     descrip = ctx.description().splitlines()[0].strip()
     if len(descrip) > 60:
       descrip = descrip[0:57] + "..."
 
-    toPrint.append((tag, user, date, branchState, descrip))
-
-  # Now print in order by reverse date
-  toPrint.sort(key=lambda a:a[2], reverse=True)
+    toPrint.append((branch, user, date, branchState, descrip))
 
   printColumns(ui, ('Branch', 'User', 'Date', 'State', 'Description'), toPrint)
 
@@ -260,30 +272,37 @@ def tbranches(ui, repo, *args, **kwargs):
 def tlog(ui, repo, *pats, **opts):
   """ show revision history of the current branch. """
 
-  curBranch = repo.dirstate.branch()
+  if opts['all']:
+    branches = [tup[0] for tup in topicBranches(repo)]
+  else:
+    branches = [repo.dirstate.branch()]
 
-  toPrint = []
+  for branch in branches:
 
-  for id in repo:
-    ctx = repo[id]
-    kind = None
-    if ctx.branch() == curBranch:
-      kind = 'local'
-    elif ctx.parents() and ctx.parents()[0].branch() == curBranch:
-      kind = ctx.branch()
-    elif len(ctx.parents()) > 1 and ctx.parents()[1].branch() == curBranch:
-      kind = ctx.branch()
+    str = "Branch: " + branch
+    ui.status("\n%s\n" % str)
+    ui.status("%s\n" % ("=" * len(str)))
 
-    if kind:
-      user = util.shortuser(ctx.user())
-      date = util.shortdate(ctx.date())
-      descrip = ctx.description().splitlines()[0].strip()
-      if len(descrip) > 60: descrip = descrip[0:57] + "..."
-      toPrint.append((int(ctx), kind, user, date, descrip))
+    toPrint = []
 
-  printColumns(ui, ('Rev num', 'Target', 'User', 'Date', 'Description'), toPrint)
+    for id in repo:
+      ctx = repo[id]
+      kind = None
+      if ctx.branch() == branch:
+        kind = 'local'
+      elif ctx.parents() and ctx.parents()[0].branch() == branch:
+        kind = ctx.branch()
+      elif len(ctx.parents()) > 1 and ctx.parents()[1].branch() == branch:
+        kind = ctx.branch()
 
+      if kind:
+        user = util.shortuser(ctx.user())
+        date = util.shortdate(ctx.date())
+        descrip = ctx.description().splitlines()[0].strip()
+        if len(descrip) > 60: descrip = descrip[0:57] + "..."
+        toPrint.append((int(ctx), kind, user, date, descrip))
 
+    printColumns(ui, ('Rev num', 'Target', 'User', 'Date', 'Description'), toPrint, indent=4)
 
 #################################################################################
 def replacedCommand(orig, ui, *args, **kwargs):
@@ -327,7 +346,7 @@ cmdtable = {
                       ""),
 
     "tlog":          (tlog,
-                      [] + commands.templateopts,
+                      [('a', 'all', None, "all topic branches, not just current")] + commands.templateopts,
                       ""),
 
 }
