@@ -194,8 +194,32 @@ def calcBranchState(repo, branch, ctx):
 
 
 #################################################################################
-def tbranch(orig, ui, *args, **kwargs):
-  print "tbranch command"
+def tbranch(ui, repo, *args, **kwargs):
+
+  if len(args) < 1:
+    ui.status("Current branch: %s\n" % repo.dirstate.branch())
+    return
+
+  target = args[0]
+  if target == repo.dirstate.branch():
+    ui.status("You're already on that branch.\n")
+    return
+
+  if target in topicBranchNames(repo, closed=True) + ['dev', 'prod', 'stage']:
+    opts = {}
+    opts['clean'] = kwargs.get('clean', False)
+    #opts['check'] = True
+    return commands.update(ui, repo, node=target, check=True)
+
+  if ui.prompt("Create new branch '%s'?" % target) != 'y':
+    return 1
+
+  if repo.dirstate.branch() != 'dev':
+    ui.status("Branching from dev...\n")
+    res = commands.update(ui, repo, node='dev', check=True)
+    if res: return res
+
+  return commands.branch(ui, repo, target)
 
 
 #################################################################################
@@ -222,7 +246,7 @@ def printColumns(ui, colNames, rows, indent=0):
 
 
 #################################################################################
-def topicBranches(repo):
+def topicBranches(repo, closed = False):
   """ Get a list of the topic branches, ordered by descending date of last change. 
       Each list entry is a tuple (branchname, headCtx) """
 
@@ -234,10 +258,11 @@ def topicBranches(repo):
     if tag in ('dev', 'stage', 'prod'):
       continue
 
-    # Skip closed branches
+    # Skip closed branches if requested
     hn = repo.lookup(node)
-    if not hn in repo.branchheads(tag, closed=False):
-      continue
+    if not closed:
+      if not hn in repo.branchheads(tag, closed=False):
+        continue
 
     # Determine all the field values we're going to print
     result.append((tag, repo[hn]))
@@ -247,8 +272,15 @@ def topicBranches(repo):
 
 
 #################################################################################
+def topicBranchNames(repo, closed = False):
+  """ Return a list of the open topic branches. """
+
+  return [tup[0] for tup in topicBranches(repo, closed)]
+
+
+#################################################################################
 def tbranches(ui, repo, *args, **kwargs):
-  """ Print out the currently open topic branches. """
+  """ show recent activity on the currently open topic branches. """
 
   # Process each branch
   toPrint = []
@@ -270,10 +302,10 @@ def tbranches(ui, repo, *args, **kwargs):
 
 #################################################################################
 def tlog(ui, repo, *pats, **opts):
-  """ show revision history of the current branch. """
+  """ show revision history of the current branch (or all branches). """
 
   if opts['all']:
-    branches = [tup[0] for tup in topicBranches(repo)]
+    branches = topicBranchNames(repo)
   else:
     branches = [repo.dirstate.branch()]
 
