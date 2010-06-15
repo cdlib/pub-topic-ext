@@ -5,11 +5,12 @@
 Extensions for eScholarship-style topic branches.
 '''
 
-import re
+import re, sys
 from xml import sax
 from StringIO import StringIO
 from mercurial import cmdutil, commands, extensions, hg, patch, url, util
 from mercurial.node import nullid, nullrev
+
 
 #################################################################################
 def ruleError(ui, message):
@@ -228,6 +229,7 @@ def tbranch(ui, repo, *args, **kwargs):
 
   if len(args) < 1:
     ui.status("Current branch: %s\n" % repo.dirstate.branch())
+    ui.status("        Status: %s\n" % calcBranchState(repo, repo.dirstate.branch(), repo[repo.dirstate.parents()[0]]))
     return
 
   target = args[0]
@@ -377,13 +379,27 @@ def tryCommand(ui, descrip, commandFunc):
   """ Run a command and capture its output. Print the output only if it fails. """
 
   ui.status(descrip)
-  ui.pushbuffer()
+  ui.flush()
+
+  # For some reason push isn't responsive to ui.pushbuffer, so we have to work
+  # harder to grab its output.
+  #
+  buffer = StringIO()
+  (oldStdout, oldStderr) = (sys.stdout, sys.stderr)
+  (sys.stdout, sys.stderr) = (buffer, buffer)
+
+  # Now run the command
   res = commandFunc()
-  str = ui.popbuffer()
+
+  # Restore in/out streams
+  (sys.stdout, sys.stderr) = (oldStdout, oldStderr)
+
+  # If something went wrong, print it out
   if res: 
-    print "ERROR!"
-    ui.warn(str)
+    ui.warn("\nERROR!\n")
+    ui.warn(buffer.getvalue())
     return res
+
   #for line in str.split("\n"):
   #  print "    " + line
   return 0
@@ -420,30 +436,30 @@ def tpush(ui, repo, *args, **opts):
     elif arg in tmp:
       ui.warn("Error: this branch has already been pushed to %s.\n" % arg)
       return 1
-    elif need not in tmp:
+    elif need and need not in tmp:
       ui.warn("Error: you must push to %s before %s\n" % (need, arg))
       return 1
     tmp.add(arg)
 
+  # Pull new changes from the central repo
+  if not opts['nopull']:
+    if tryCommand(ui, "Pull - ", lambda:commands.pull(ui, repo, **opts)):
+      return 1
+
   # Okay, let's go for it.
   for mergeTo in args:
 
-    # Pull new changes from the central repo
-    if not opts['nopull']:
-      if tryCommand(ui, "Pulling new changes.\n", lambda:commands.pull(ui, repo, **opts)):
-        return 1
-
     # Update to the branch we're going to merge into
-    if tryCommand(ui, "Updating to %s.\n" % mergeTo, lambda:hg.update(repo, mergeTo)):
+    if tryCommand(ui, "Update(%s) - " % mergeTo, lambda:hg.update(repo, mergeTo)):
       return 1
 
     # Merge it.
-    if tryCommand(ui, "Merging from %s.\n" % mergeFrom, lambda:hg.merge(repo, mergeFrom)):
+    if tryCommand(ui, "Merge(%s) - " % mergeFrom, lambda:hg.merge(repo, mergeFrom)):
       return 1
 
     # Stop if requested.
     if opts['nocommit']:
-      ui.status("Stopping before commit as requested.\n")
+      ui.status("\nStopping before commit as requested.\n")
       return 0
 
     # Unlike a normal hg commit, if no text is specified we supply a reasonable default.
@@ -452,21 +468,23 @@ def tpush(ui, repo, *args, **opts):
       text = "Merge to %s" % mergeTo
 
     # Commit it.
-    ui.status("Commiting merge.\n")
-    node = repo.commit(text)
-    if not node:
-
-      ui.warn("Nothing changed.\n")
-
-    else:
-
-      # Push to the central server
-      if tryCommand(ui, "Pushing to central repository.\n", lambda:commands.push(ui, repo, branch=(mergeTo,), **opts)):
-        return 1
-
-    # And return to the original feature branch
-    if tryCommand(ui, "Returning to %s.\n" % mergeFrom, lambda:hg.update(repo, mergeFrom)):
+    if tryCommand(ui, "Commit - ", lambda:repo.commit(text) is None):
       return 1
+    #ui.status("Commiting merge.\n")
+    #node = repo.commit(text)
+    #if not node:
+    #  ui.warn("Nothing changed.\n")
+
+    # Push to the central server
+    if tryCommand(ui, "Push(%s) - " % mergeTo, 
+                  lambda:commands.push(ui, repo, branch=(mergeTo,), **opts)):
+      return 1
+
+  # When all done, return to the original feature branch
+  if tryCommand(ui, "Update(%s)" % mergeFrom, lambda:hg.update(repo, mergeFrom)):
+    return 1
+
+  ui.status("\n")
 
 
 #################################################################################
@@ -517,7 +535,7 @@ cmdtable = {
                       ""),
 
     "tpush|tp":      (tpush,
-                      [('m', 'message',   None, "use <text> as commit message instead of default ' --> <branch>'"),
+                      [('m', 'message',   None, "use <text> as commit message instead of default 'Merge to <branch>'"),
                        ('P', 'nopull',    None, "don't pull current data from master"),
                        ('C', 'nocommit',  None, "merge only, don't commit or push")] + commands.remoteopts,
                       "dev|stage|prod"),
