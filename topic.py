@@ -148,8 +148,6 @@ def repushChangegroup(ui, repo, hooktype, **opts):
   """ changegroup hook: if pushing to dev/stage/prod branch, push the stuff
       further on to the appropriate server. """
 
-  print "in repush: cwd=", os.getcwd()
-
   branchesChanged = set()
   for ctx in [repo[n] for n in range(int(repo[opts['node']]), len(repo))]:
     branchesChanged.add(ctx.branch())
@@ -515,6 +513,7 @@ def tpush(ui, repo, *args, **opts):
     tmp.add(arg)
 
   pulled = False # only pull once
+  commitStop = False # note if we get to that step
 
   # Okay, let's go for it.
   try:
@@ -541,6 +540,7 @@ def tpush(ui, repo, *args, **opts):
         # Stop if requested.
         if opts['nocommit']:
           ui.status("\nStopping before commit as requested.\n")
+          commitStop = True
           return 0
 
         # Unlike a normal hg commit, if no text is specified we supply a reasonable default.
@@ -555,20 +555,20 @@ def tpush(ui, repo, *args, **opts):
       # Push to the central server
       pushOpts = opts
       pushOpts['force'] = True # we very often create new branches and it's okay!
-      if tryCommand(ui, "push -f -b %s ... " % mergeTo, 
+      if tryCommand(ui, "push -fb %s ... " % mergeTo, 
                     lambda:commands.push(ui, repo, branch=(mergeTo,), **pushOpts)):
         return 1
 
     # And return to the original topic branch
     if repo.dirstate.branch() != mergeFrom:
-      if tryCommand(ui, "tbranch %s ... " % mergeFrom, lambda:hg.update(repo, mergeFrom)):
+      if tryCommand(ui, "update %s ... " % mergeFrom, lambda:hg.update(repo, mergeFrom)):
         return 1
 
     ui.status("done.\n")
 
   # When all done, return to the original topic branch (even if something went wrong)
   finally:
-    if repo.dirstate.branch() != mergeFrom:
+    if repo.dirstate.branch() != mergeFrom and not commitStop:
       ui.pushbuffer()
       hg.update(repo, mergeFrom)
       ui.popbuffer()
