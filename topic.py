@@ -156,7 +156,7 @@ def repushChangegroup(ui, repo, hooktype, **opts):
     repushTarget = ui.config('topic', 'repush-'+branch)
     if repushTarget:
       ui.status("Re-push %s branch: " % branch)
-      commands.push(ui, repo, dest=repushTarget, branch = (branch,), force = True)
+      commands.push(ui, repo, dest=repushTarget, force = True)
 
 
 #################################################################################
@@ -477,21 +477,38 @@ def tryCommand(ui, descrip, commandFunc):
 
 
 ###############################################################################
-def tpush(ui, repo, *args, **opts):
-  """ merge current branch to dev, stage, or production and push it there. """
+def onTopicBranch(ui, repo):
+  """ Check if the repo is currently on a topic branch. """
 
-  mergeFrom = repo.dirstate.branch()
-  if mergeFrom in ('dev', 'stage', 'prod', 'default'):
+  branch = repo.dirstate.branch()
+  if branch in ('dev', 'stage', 'prod', 'default'):
     ui.warn("Error: you are not currently on a topic branch. Use 'tbranch' to switch to one.\n")
-    return 1
+    return False
+  return True
 
-  if len(args) < 1:
-    ui.warn("Error: You must specify at least one branch (dev/stage/prod) to push to.\n")
-    return 1
+
+###############################################################################
+def isClean(ui, repo):
+  """ Check if the repo is clean (no uncommitted changes). If not, print a message. """
 
   # If stuff hasn't been committed yet it doesn't make sense to push.
   if repo[None].dirty():
     ui.warn("Error: There are uncommitted changes.\n");
+    return False
+  return True
+
+
+###############################################################################
+def tpush(ui, repo, *args, **opts):
+  """ merge current branch to dev, stage, or production and push it there. """
+
+  # Sanity checks
+  if not(onTopicBranch() and isClean()):
+    return 1
+  mergeFrom = repo.dirstate.branch()
+
+  if len(args) < 1:
+    ui.warn("Error: You must specify at least one branch (dev/stage/prod) to push to.\n")
     return 1
 
   # Figure out where it's currently pushed to
@@ -574,6 +591,49 @@ def tpush(ui, repo, *args, **opts):
       ui.popbuffer()
 
 
+###############################################################################
+def tclose(ui, repo, *args, **opts):
+  """ close the current topic branch and push to the central repository. """
+
+  # Sanity check
+  if not isClean(ui, repo):
+    return 1
+
+  if args:
+    branches = args
+  else:
+    if not onTopicBranch(ui, repo):
+      return 1
+    branches = [repo.dirstate.branch()]
+
+  for branch in branches:
+    if not repo.branchheads(branch) or branch in ('default', 'dev', 'stage', 'prod'):
+      ui.warn("Error: %s is not an open topic branch\n" % branch)
+      return 1
+
+  for branch in branches:
+
+    if branch != repo.dirstate.branch():
+      if tryCommand(ui, "update %s ... " % branch, lambda:commands.update(ui, repo, node=branch)):
+        return 1
+
+    # Unlike a normal hg commit, if no text is specified we supply a reasonable default.
+    branch = repo.dirstate.branch()
+    text = opts.get('message')
+    if text is None:
+      text = "Closing %s" % branch
+
+    # Close it
+    if tryCommand(ui, "commit --close-branch ... ", lambda:repo.commit(text, extra = {'close':'True'}) is None):
+      return 1
+
+    # And push.
+    if tryCommand(ui, "push -b %s ... " % branch, lambda:commands.push(ui, repo, branch=(branch,), **opts)):
+      return 1
+
+  ui.status("done.\n")
+
+
 #################################################################################
 def replacedCommand(orig, ui, *args, **kwargs):
   """ This is called for commands our extension replaces, like "branch". We
@@ -609,7 +669,7 @@ def uisetup(ui):
 cmdtable = {
     "tbranch|tb":    (tbranch,
                       [('C', 'clean', None, 'discard uncommitted changes (no backup)')],
-                      ""),
+                      "[branch]"),
 
     "tbranches|tbs": (tbranches,
                       [('c', 'closed', None, "include closed branches")],
@@ -619,13 +679,19 @@ cmdtable = {
                       [('a', 'all', None, "all topic branches, not just current"),
                        ('c', 'closed', None, "include closed branches")] \
                        + commands.templateopts,
-                      ""),
+                      "[branches]"),
 
     "tpush|tp":      (tpush,
                       [('m', 'message',   None, "use <text> as commit message instead of default 'Merge to <branch>'"),
                        ('P', 'nopull',    None, "don't pull current data from master"),
-                       ('C', 'nocommit',  None, "merge only, don't commit or push")] + commands.remoteopts,
+                       ('C', 'nocommit',  None, "merge only, don't commit or push")] 
+                       + commands.remoteopts,
                       "dev|stage|prod"),
+
+    "tclose":        (tclose,
+                      [('m', 'message',   None, "use <text> as commit message instead of default 'Closing <branch>'")]
+                      + commands.remoteopts,
+                      "[branches]"),
 
 }
 
