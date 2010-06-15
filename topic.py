@@ -123,9 +123,10 @@ def checkBranch(ui, repo, node):
 
 
 #################################################################################
-def pretxnchangegroup(ui, repo, hooktype, **opts):
+def validateChangegroup(ui, repo, hooktype, **opts):
 
-  """ Perform content-specific checks before accepting an incoming changegroup """
+  """ pretxnchangegroup hook: perform content-specific checks before accepting 
+      an incoming changegroup. """
 
   # Check each incoming commit to make sure it meets our rules
   for ctx in [repo[n] for n in range(int(repo[opts['node']]), len(repo))]:
@@ -133,7 +134,7 @@ def pretxnchangegroup(ui, repo, hooktype, **opts):
     parents = ctx.parents()
     if len(parents) == 1:
       parents.append(None)
-    res = pretxncommit(ui, repo, str(ctx), parents[0], parents[1])
+    res = validateCommit(ui, repo, str(ctx), parents[0], parents[1])
     if res:
       return res
 
@@ -142,9 +143,10 @@ def pretxnchangegroup(ui, repo, hooktype, **opts):
 
 
 #################################################################################
-def pretxncommit(ui, repo, node, *args, **kwargs):
+def validateCommit(ui, repo, node, *args, **kwargs):
 
-  """ Perform content-specific checks before accepting a commit """
+  """ pretxncommit hook: perform content-specific checks before accepting 
+      a commit """
 
   # Check for any tabs being added in any file. They're not allowd.
   if not checkTabs(ui, repo, node):
@@ -188,9 +190,15 @@ def revsOnBranch(repo, branch):
 def findMainMerge(repo, topicRevs, mainBranch):
   """ Figure out whether a local branch has been merged to a main branch. """
 
-  firstTopicRev = int(topicRevs[-1])
-  topicSet = set(topicRevs)
+  # Handle brand new branch
+  if not topicRevs:
+    return None
 
+  # Determine where to stop the scan
+  firstTopicRev = int(topicRevs[-1])
+
+  # Scan for merges from the topic branch to the given main branch
+  topicSet = set(topicRevs)
   for mr in revsOnBranch(repo, mainBranch):
 
     # Stop if we reach a point in history before the start of the topic
@@ -450,61 +458,78 @@ def tpush(ui, repo, *args, **opts):
 
   # Make sure the arguments are in order (dev -> stage -> prod)
   tmp = set(pushedTo)
+  alreadyMerged = set()
   for arg in args:
     need = {'dev':None, 'stage':'dev', 'prod':'stage'}.get(arg, 'bad')
     if need == 'bad':
       ui.warn("Error: you may only push to 'dev', 'stage', or 'prod'.\n")
       return 1
     elif arg in tmp:
-      ui.warn("Error: this branch has already been pushed to %s.\n" % arg)
-      return 1
+      alreadyMerged.add(arg) # don't merge again
     elif need and need not in tmp:
       ui.warn("Error: you must push to %s before %s\n" % (need, arg))
       return 1
     tmp.add(arg)
 
-  # Pull new changes from the central repo
-  if not opts['nopull']:
-    if tryCommand(ui, "pull ... ", lambda:commands.pull(ui, repo, **opts)):
-      return 1
 
   # Okay, let's go for it.
-  for mergeTo in args:
+  pulled = False
+  print "alreadyMerged:", alreadyMerged
+  try:
 
-    # Update to the branch we're going to merge into
-    if tryCommand(ui, "tbranch %s ... " % mergeTo, lambda:hg.update(repo, mergeTo)):
-      return 1
+    for mergeTo in args:
 
-    # Merge it.
-    if tryCommand(ui, "merge %s ... " % mergeFrom, lambda:hg.merge(repo, mergeFrom)):
-      return 1
+      # Pull new changes from the central repo
+      if not opts['nopull'] and not pulled and set(args) - alreadyMerged:
+        if tryCommand(ui, "pull ... ", lambda:commands.pull(ui, repo, **opts)):
+          return 1
+        pulled = True
 
-    # Stop if requested.
-    if opts['nocommit']:
-      ui.status("\nStopping before commit as requested.\n")
-      return 0
+      # Merge if necessary
+      if not mergeTo in alreadyMerged:
 
-    # Unlike a normal hg commit, if no text is specified we supply a reasonable default.
-    text = opts.get('message')
-    if text is None:
-      text = "Merge %s to %s" % (mergeFrom, mergeTo)
+        # Update to the branch we're going to merge into
+        if tryCommand(ui, "update %s ... " % mergeTo, lambda:hg.update(repo, mergeTo)):
+          return 1
 
-    # Commit it.
-    if tryCommand(ui, "commit ... ", lambda:repo.commit(text) is None):
-      return 1
+        # Merge it.
+        if tryCommand(ui, "merge %s ... " % mergeFrom, lambda:hg.merge(repo, mergeFrom)):
+          return 1
 
-    # Push to the central server
-    pushOpts = opts
-    pushOpts['force'] = True # we very often create new branches and it's okay!
-    if tryCommand(ui, "push -f -b %s ... " % mergeTo, 
-                  lambda:commands.push(ui, repo, branch=(mergeTo,), **pushOpts)):
-      return 1
+        # Stop if requested.
+        if opts['nocommit']:
+          ui.status("\nStopping before commit as requested.\n")
+          return 0
 
-  # When all done, return to the original feature branch
-  if tryCommand(ui, "tbranch %s" % mergeFrom, lambda:hg.update(repo, mergeFrom)):
-    return 1
+        # Unlike a normal hg commit, if no text is specified we supply a reasonable default.
+        text = opts.get('message')
+        if text is None:
+          text = "Merge %s to %s" % (mergeFrom, mergeTo)
 
-  ui.status("\n")
+        # Commit it.
+        if tryCommand(ui, "commit ... ", lambda:repo.commit(text) is None):
+          return 1
+
+      # Push to the central server
+      pushOpts = opts
+      pushOpts['force'] = True # we very often create new branches and it's okay!
+      if tryCommand(ui, "push -f -b %s ... " % mergeTo, 
+                    lambda:commands.push(ui, repo, branch=(mergeTo,), **pushOpts)):
+        return 1
+
+    # And return to the original topic branch
+    if repo.dirstate.branch() != mergeFrom:
+      if tryCommand(ui, "tbranch %s ... " % mergeFrom, lambda:hg.update(repo, mergeFrom)):
+        return 1
+
+    ui.status("done.\n")
+
+  # When all done, return to the original topic branch (even if something went wrong)
+  finally:
+    if repo.dirstate.branch() != mergeFrom:
+      ui.pushbuffer()
+      hg.update(repo, mergeFrom)
+      ui.popbuffer()
 
 
 #################################################################################
