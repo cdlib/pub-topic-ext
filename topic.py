@@ -143,6 +143,23 @@ def validateChangegroup(ui, repo, hooktype, **opts):
 
 
 #################################################################################
+def repushChangegroup(ui, repo, hooktype, **opts):
+
+  """ changegroup hook: if pushing to dev/stage/prod branch, push the stuff
+      further on to the appropriate server. """
+
+  branchesChanged = set()
+  for ctx in [repo[n] for n in range(int(repo[opts['node']]), len(repo))]:
+    branchesChanged.add(ctx.branch())
+
+  for branch in sorted(branchesChanged):
+    repushTarget = ui.config('topic', 'repush-'+branch)
+    if repushTarget:
+      ui.status("Re-push %s branch: " % branch)
+      commands.push(ui, repo, dest=repushTarget, branch = (branch,), force = True)
+
+
+#################################################################################
 def validateCommit(ui, repo, node, *args, **kwargs):
 
   """ pretxncommit hook: perform content-specific checks before accepting 
@@ -471,10 +488,9 @@ def tpush(ui, repo, *args, **opts):
       return 1
     tmp.add(arg)
 
+  pulled = False # only pull once
 
   # Okay, let's go for it.
-  pulled = False
-  print "alreadyMerged:", alreadyMerged
   try:
 
     for mergeTo in args:
@@ -506,7 +522,7 @@ def tpush(ui, repo, *args, **opts):
         if text is None:
           text = "Merge %s to %s" % (mergeFrom, mergeTo)
 
-        # Commit it.
+        # Commit the merge.
         if tryCommand(ui, "commit ... ", lambda:repo.commit(text) is None):
           return 1
 
@@ -551,7 +567,7 @@ def uisetup(ui):
   """ Called by Mercurial to give us a chance to manipulate the ui. """
 
   # Set replaced commands to print a message unless forced.
-  if False:
+  if False: # Not sure this is really a good idea
     overrideOpt = [('', 'tforce', None, "override check and run original hg command")]
     entry = extensions.wrapcommand(commands.table, 'branch', replacedCommand)
     entry[1].extend(overrideOpt)
