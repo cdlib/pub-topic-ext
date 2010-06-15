@@ -130,6 +130,8 @@ def pretxncommit(ui, repo, node, parent1, parent2, **kwargs):
 
   """ Perform content-specific checks before accepting a commit (clients) or incoming changegroup (servers) """
 
+  print "\npretxncommit node=", node, int(repo[node])
+
   # Check for any tabs being added in any file. They're not allowd.
   if not checkTabs(ui, repo, node):
     return True # abort
@@ -225,7 +227,7 @@ def calcBranchState(repo, branch, ctx):
 
 
 #################################################################################
-def tbranch(ui, repo, *args, **kwargs):
+def tbranch(ui, repo, *args, **opts):
 
   if len(args) < 1:
     ui.status("Current branch: %s\n" % repo.dirstate.branch())
@@ -238,10 +240,10 @@ def tbranch(ui, repo, *args, **kwargs):
     return
 
   if target in topicBranchNames(repo, closed=True) + ['dev', 'prod', 'stage']:
-    opts = {}
-    opts['clean'] = kwargs.get('clean', False)
-    #opts['check'] = True
-    return commands.update(ui, repo, node=target, check=True)
+    return commands.update(ui, repo, 
+                           node = target, 
+                           check = not opts.get('clean', False),
+                           clean = opts.get('clean', False))
 
   if ui.prompt("Create new branch '%s'?" % target) != 'y':
     return 1
@@ -521,7 +523,7 @@ def uisetup(ui):
 #
 cmdtable = {
     "tbranch|tb":    (tbranch,
-                      [],
+                      [('C', 'clean', None, 'discard uncommitted changes (no backup)')],
                       ""),
 
     "tbranches|tbs": (tbranches,
