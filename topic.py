@@ -5,7 +5,7 @@
 Extensions for eScholarship-style topic branches.
 '''
 
-import re, sys
+import os, re, sys
 from xml import sax
 from StringIO import StringIO
 from mercurial import cmdutil, commands, extensions, hg, patch, url, util
@@ -148,6 +148,8 @@ def repushChangegroup(ui, repo, hooktype, **opts):
   """ changegroup hook: if pushing to dev/stage/prod branch, push the stuff
       further on to the appropriate server. """
 
+  print "in repush: cwd=", os.getcwd()
+
   branchesChanged = set()
   for ctx in [repo[n] for n in range(int(repo[opts['node']]), len(repo))]:
     branchesChanged.add(ctx.branch())
@@ -157,6 +159,23 @@ def repushChangegroup(ui, repo, hooktype, **opts):
     if repushTarget:
       ui.status("Re-push %s branch: " % branch)
       commands.push(ui, repo, dest=repushTarget, branch = (branch,), force = True)
+
+
+#################################################################################
+def autoUpdate(ui, repo, hooktype, **opts):
+
+  """ changegroup hook: if a push arrives with changes to the current branch,
+      update it automatically. """
+
+  thisBranch = repo.dirstate.branch()
+  needUpdate = False
+  for ctx in [repo[n] for n in range(int(repo[opts['node']]), len(repo))]:
+    if ctx.branch() == thisBranch:
+      needUpdate = True
+  
+  if needUpdate:
+    ui.status("Auto-update on branch %s\n" % thisBranch)
+    commands.update(ui, repo, node = thisBranch)
 
 
 #################################################################################
@@ -381,6 +400,8 @@ def tlog(ui, repo, *pats, **opts):
 
   if opts['all']:
     branches = topicBranchNames(repo, opts.get('closed', False))
+  elif pats:
+    branches = pats
   else:
     branches = [repo.dirstate.branch()]
 
@@ -389,6 +410,10 @@ def tlog(ui, repo, *pats, **opts):
     str = "Branch: " + branch
     ui.status("\n%s\n" % str)
     ui.status("%s\n" % ("=" * len(str)))
+
+    if not branch in repo.branchmap():
+      ui.status("<unknown>\n")
+      continue
 
     toPrint = []
 
@@ -440,9 +465,10 @@ def tryCommand(ui, descrip, commandFunc):
 
     # Restore in/out streams
     (sys.stdout, sys.stderr) = (oldStdout, oldStderr)
-    if not ok:
-      ui.warn("\n")
-      ui.warn(buffer.getvalue())
+    outFunc = ui.warn if not ok else ui.note
+    outFunc("\n")
+    for line in buffer.getvalue().split("\n"):
+      outFunc("    " + line + "\n")
 
   # If something went wrong, print it out
   if res: 
