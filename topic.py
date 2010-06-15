@@ -56,16 +56,16 @@ def checkXML(ui, repo, node):
 
 
 #################################################################################
-def checkBranch(ui, repo, node, parent1, parent2):
+def checkBranch(ui, repo, node):
   """ Ensure that branches meet our topic branching rules. """
 
   # Collect some useful info
   ctx = repo[node]
+  parent1 = ctx.parents()[0]
+  parent2 = None if len(ctx.parents()) == 1 else ctx.parents()[1]
   thisBranch = ctx.branch()
-  p1Branch = repo[parent1].branch()
-  if parent2 == '':
-    parent2 = None
-  p2Branch = repo[parent2].branch() if parent2 else None
+  p1Branch = parent1.branch()
+  p2Branch = parent2.branch() if parent2 else None
 
   # Don't allow anything to go into the default branch.
   if thisBranch == 'default':
@@ -102,9 +102,6 @@ def checkBranch(ui, repo, node, parent1, parent2):
       # For instance, if we're trying to merge to stage, find the last rev that was merged
       # to dev.
       #
-      # TODO: I think this *will* work when processing multiple changegroups during a push,
-      #       but gotta test that.
-      #
       branchMap = repo.branchmap()
       assert reqPred in branchMap
       reqHead = branchMap[reqPred][0]
@@ -113,7 +110,7 @@ def checkBranch(ui, repo, node, parent1, parent2):
       # If there have been changes to the feature since the last merge to the predecessor,
       # that means somebody forgot to do the missing merge.
       #
-      if ancestor != repo[parent2]:
+      if ancestor != parent2:
         return ruleError(ui, "You must merge changes to %s before %s." % (reqPred, thisBranch))
 
   else:
@@ -126,11 +123,28 @@ def checkBranch(ui, repo, node, parent1, parent2):
 
 
 #################################################################################
-def pretxncommit(ui, repo, node, parent1, parent2, **kwargs):
+def pretxnchangegroup(ui, repo, hooktype, **opts):
 
-  """ Perform content-specific checks before accepting a commit (clients) or incoming changegroup (servers) """
+  """ Perform content-specific checks before accepting an incoming changegroup """
 
-  print "\npretxncommit node=", node, int(repo[node])
+  # Check each incoming commit to make sure it meets our rules
+  for ctx in [repo[n] for n in range(int(repo[opts['node']]), len(repo))]:
+    #print int(ctx), ctx.branch(), ctx.description()
+    parents = ctx.parents()
+    if len(parents) == 1:
+      parents.append(None)
+    res = pretxncommit(ui, repo, str(ctx), parents[0], parents[1])
+    if res:
+      return res
+
+  # No problems found.
+  return 0
+
+
+#################################################################################
+def pretxncommit(ui, repo, node, *args, **kwargs):
+
+  """ Perform content-specific checks before accepting a commit """
 
   # Check for any tabs being added in any file. They're not allowd.
   if not checkTabs(ui, repo, node):
@@ -141,7 +155,7 @@ def pretxncommit(ui, repo, node, parent1, parent2, **kwargs):
     return True # abort
 
   # Branches must meet our topic rules
-  if not checkBranch(ui, repo, node, parent1, parent2):
+  if not checkBranch(ui, repo, node):
     return True # abort
   
   # All done.
@@ -391,19 +405,25 @@ def tryCommand(ui, descrip, commandFunc):
   (sys.stdout, sys.stderr) = (buffer, buffer)
 
   # Now run the command
-  res = commandFunc()
+  ok = False
+  try:
 
-  # Restore in/out streams
-  (sys.stdout, sys.stderr) = (oldStdout, oldStderr)
+    res = commandFunc()
+    ok = True
+
+  finally:
+
+    # Restore in/out streams
+    (sys.stdout, sys.stderr) = (oldStdout, oldStderr)
+    if not ok:
+      ui.warn("\n")
+      ui.warn(buffer.getvalue())
 
   # If something went wrong, print it out
   if res: 
-    ui.warn("\nERROR!\n")
-    ui.warn(buffer.getvalue())
     return res
 
-  #for line in str.split("\n"):
-  #  print "    " + line
+  # Otherwise, tell the caller it went fine
   return 0
 
 
@@ -445,18 +465,18 @@ def tpush(ui, repo, *args, **opts):
 
   # Pull new changes from the central repo
   if not opts['nopull']:
-    if tryCommand(ui, "Pull - ", lambda:commands.pull(ui, repo, **opts)):
+    if tryCommand(ui, "pull ... ", lambda:commands.pull(ui, repo, **opts)):
       return 1
 
   # Okay, let's go for it.
   for mergeTo in args:
 
     # Update to the branch we're going to merge into
-    if tryCommand(ui, "Update(%s) - " % mergeTo, lambda:hg.update(repo, mergeTo)):
+    if tryCommand(ui, "tbranch %s ... " % mergeTo, lambda:hg.update(repo, mergeTo)):
       return 1
 
     # Merge it.
-    if tryCommand(ui, "Merge(%s) - " % mergeFrom, lambda:hg.merge(repo, mergeFrom)):
+    if tryCommand(ui, "merge %s ... " % mergeFrom, lambda:hg.merge(repo, mergeFrom)):
       return 1
 
     # Stop if requested.
@@ -467,23 +487,21 @@ def tpush(ui, repo, *args, **opts):
     # Unlike a normal hg commit, if no text is specified we supply a reasonable default.
     text = opts.get('message')
     if text is None:
-      text = "Merge to %s" % mergeTo
+      text = "Merge %s to %s" % (mergeFrom, mergeTo)
 
     # Commit it.
-    if tryCommand(ui, "Commit - ", lambda:repo.commit(text) is None):
+    if tryCommand(ui, "commit ... ", lambda:repo.commit(text) is None):
       return 1
-    #ui.status("Commiting merge.\n")
-    #node = repo.commit(text)
-    #if not node:
-    #  ui.warn("Nothing changed.\n")
 
     # Push to the central server
-    if tryCommand(ui, "Push(%s) - " % mergeTo, 
-                  lambda:commands.push(ui, repo, branch=(mergeTo,), **opts)):
+    pushOpts = opts
+    pushOpts['force'] = True # we very often create new branches and it's okay!
+    if tryCommand(ui, "push -f -b %s ... " % mergeTo, 
+                  lambda:commands.push(ui, repo, branch=(mergeTo,), **pushOpts)):
       return 1
 
   # When all done, return to the original feature branch
-  if tryCommand(ui, "Update(%s)" % mergeFrom, lambda:hg.update(repo, mergeFrom)):
+  if tryCommand(ui, "tbranch %s" % mergeFrom, lambda:hg.update(repo, mergeFrom)):
     return 1
 
   ui.status("\n")
