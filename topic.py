@@ -8,7 +8,7 @@ Extensions for eScholarship-style topic branches.
 import re
 from xml import sax
 from StringIO import StringIO
-from mercurial import cmdutil, commands, extensions, hg, patch, util
+from mercurial import cmdutil, commands, extensions, hg, patch, url, util
 from mercurial.node import nullid, nullrev
 
 #################################################################################
@@ -147,7 +147,7 @@ def pretxncommit(ui, repo, node, parent1, parent2, **kwargs):
 
 #################################################################################
 def revsOnBranch(repo, branch):
-  """ Yield all revisions of the given branch, in topoligical order. """
+  """ Yield all revisions of the given branch, in topological order. """
 
   visit = repo.branchheads(branch, closed = True)
   seen = set()
@@ -168,12 +168,35 @@ def revsOnBranch(repo, branch):
 
 
 #################################################################################
+def findMainMerge(repo, topicRevs, mainBranch):
+  """ Figure out whether a local branch has been merged to a main branch. """
+
+  firstTopicRev = int(topicRevs[-1])
+  topicSet = set(topicRevs)
+
+  for mr in revsOnBranch(repo, mainBranch):
+
+    # Stop if we reach a point in history before the start of the topic
+    if int(mr) < int(topicRevs[-1]):
+      break
+
+    # Skip non-merges
+    if len(mr.parents()) < 2:
+      continue
+
+    # Is this a marge from our topic branch? If so we're done.
+    if mr.parents()[1] in topicSet:
+      return mr.parents()[1]
+      break
+
+  # Couldn't find anything.
+  return None
+
+
+#################################################################################
 def calcBranchState(repo, branch, ctx):
   """ Figure out whether the given branch is local, or has been merged to
       dev/stage/prod. """
-
-  # Find all the revs in this feature branch
-  featureRevs = list(revsOnBranch(repo, branch))
 
   # Detect if the branch has been closed
   if 'close' in ctx.changeset()[5]:
@@ -182,15 +205,11 @@ def calcBranchState(repo, branch, ctx):
     states = {ctx: 'local'}
 
   # Now check for merges to dev, stage, and prod
+  topicRevs = list(revsOnBranch(repo, branch))
   for mainBr in ('dev', 'stage', 'prod'):
-    found = None
-    for p in revsOnBranch(repo, mainBr):
-      for pp in p.parents():
-        if pp in featureRevs:
-          found = pp
-      if found:
-        states[found] = mainBr
-        break
+    found = findMainMerge(repo, topicRevs, mainBr)
+    if found:
+      states[found] = mainBr
 
   # Make the final textual version
   outList = []
@@ -352,6 +371,104 @@ def tlog(ui, repo, *pats, **opts):
 
     printColumns(ui, ('Rev num', 'Who', 'When', 'Where', 'Description'), toPrint, indent=4)
 
+
+###############################################################################
+def tryCommand(ui, descrip, commandFunc):
+  """ Run a command and capture its output. Print the output only if it fails. """
+
+  ui.status(descrip)
+  ui.pushbuffer()
+  res = commandFunc()
+  str = ui.popbuffer()
+  if res: 
+    print "ERROR!"
+    ui.warn(str)
+    return res
+  #for line in str.split("\n"):
+  #  print "    " + line
+  return 0
+
+
+###############################################################################
+def tpush(ui, repo, *args, **opts):
+  """ merge current branch to dev, stage, or production and push it there. """
+
+  mergeFrom = repo.dirstate.branch()
+  if mergeFrom in ('dev', 'stage', 'prod', 'default'):
+    ui.warn("Error: you are not currently on a topic branch. Use 'tbranch' to switch to one.\n")
+    return 1
+
+  if len(args) < 1:
+    ui.warn("Error: You must specify at least one branch (dev/stage/prod) to push to.\n")
+    return 1
+
+  # If stuff hasn't been committed yet it doesn't make sense to push.
+  if repo[None].dirty():
+    ui.warn("Error: There are uncommitted changes.\n");
+    return 1
+
+  # Figure out where it's currently pushed to
+  pushedTo = [p.branch() for p in repo.parents()[0].children()]
+
+  # Make sure the arguments are in order (dev -> stage -> prod)
+  tmp = set(pushedTo)
+  for arg in args:
+    need = {'dev':None, 'stage':'dev', 'prod':'stage'}.get(arg, 'bad')
+    if need == 'bad':
+      ui.warn("Error: you may only push to 'dev', 'stage', or 'prod'.\n")
+      return 1
+    elif arg in tmp:
+      ui.warn("Error: this branch has already been pushed to %s.\n" % arg)
+      return 1
+    elif need not in tmp:
+      ui.warn("Error: you must push to %s before %s\n" % (need, arg))
+      return 1
+    tmp.add(arg)
+
+  # Okay, let's go for it.
+  for mergeTo in args:
+
+    # Pull new changes from the central repo
+    if not opts['nopull']:
+      if tryCommand(ui, "Pulling new changes.\n", lambda:commands.pull(ui, repo, **opts)):
+        return 1
+
+    # Update to the branch we're going to merge into
+    if tryCommand(ui, "Updating to %s.\n" % mergeTo, lambda:hg.update(repo, mergeTo)):
+      return 1
+
+    # Merge it.
+    if tryCommand(ui, "Merging from %s.\n" % mergeFrom, lambda:hg.merge(repo, mergeFrom)):
+      return 1
+
+    # Stop if requested.
+    if opts['nocommit']:
+      ui.status("Stopping before commit as requested.\n")
+      return 0
+
+    # Unlike a normal hg commit, if no text is specified we supply a reasonable default.
+    text = opts.get('message')
+    if text is None:
+      text = "Merge to %s" % mergeTo
+
+    # Commit it.
+    ui.status("Commiting merge.\n")
+    node = repo.commit(text)
+    if not node:
+
+      ui.warn("Nothing changed.\n")
+
+    else:
+
+      # Push to the central server
+      if tryCommand(ui, "Pushing to central repository.\n", lambda:commands.push(ui, repo, branch=(mergeTo,), **opts)):
+        return 1
+
+    # And return to the original feature branch
+    if tryCommand(ui, "Returning to %s.\n" % mergeFrom, lambda:hg.update(repo, mergeFrom)):
+      return 1
+
+
 #################################################################################
 def replacedCommand(orig, ui, *args, **kwargs):
   """ This is called for commands our extension replaces, like "branch". We
@@ -393,11 +510,17 @@ cmdtable = {
                       [('c', 'closed', None, "include closed branches")],
                       ""),
 
-    "tlog":          (tlog,
+    "tlog|tl":       (tlog,
                       [('a', 'all', None, "all topic branches, not just current"),
                        ('c', 'closed', None, "include closed branches")] \
                        + commands.templateopts,
                       ""),
+
+    "tpush|tp":      (tpush,
+                      [('m', 'message',   None, "use <text> as commit message instead of default ' --> <branch>'"),
+                       ('P', 'nopull',    None, "don't pull current data from master"),
+                       ('C', 'nocommit',  None, "merge only, don't commit or push")] + commands.remoteopts,
+                      "dev|stage|prod"),
 
 }
 
