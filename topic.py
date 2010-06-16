@@ -159,6 +159,7 @@ def repushChangegroup(ui, repo, hooktype, **opts):
     if repushTarget:
       ui.status("Re-push %s branch: " % branch)
       commands.push(ui, repo, dest=repushTarget, force = True)
+      ui.status("Done with re-push to %s\n" % branch)
 
 
 #################################################################################
@@ -176,6 +177,7 @@ def autoUpdate(ui, repo, hooktype, **opts):
   if needUpdate:
     ui.status("Auto-update on branch %s\n" % thisBranch)
     commands.update(ui, repo, node = thisBranch)
+    ui.status("Done with auto-update on branch %s\n" % thisBranch)
 
 
 #################################################################################
