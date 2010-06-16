@@ -42,7 +42,9 @@ def checkXML(ui, repo, node):
   """ Ensure than any XML files being commited are well-formed. """
 
   ctx = repo[node]
-  for filename in ctx:
+  status = repo.status(ctx.parents()[0].node(), ctx.node())
+  changedOrAdded = status[0] + status[1]
+  for filename in changedOrAdded:
     data = ctx[filename].data()
     if util.binary(data):
       continue
