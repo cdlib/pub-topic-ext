@@ -289,6 +289,8 @@ def calcBranchState(repo, branch, ctx):
 #################################################################################
 def tbranch(ui, repo, *args, **opts):
 
+  """ show current branch status, switch to a different branch, or create a branch """
+
   if len(args) < 1:
     ui.status("Current branch: %s\n" % repo.dirstate.branch())
     ui.status("        Status: %s\n" % calcBranchState(repo, repo.dirstate.branch(), repo[repo.dirstate.parents()[0]]))
@@ -374,7 +376,7 @@ def topicBranchNames(repo, closed = False):
 
 #################################################################################
 def tbranches(ui, repo, *args, **kwargs):
-  """ show recent activity on the currently open topic branches. """
+  """ show recent activity on the currently open topic branches """
 
   closed = kwargs.get('closed', False)
 
@@ -398,7 +400,7 @@ def tbranches(ui, repo, *args, **kwargs):
 
 #################################################################################
 def tlog(ui, repo, *pats, **opts):
-  """ show revision history of the current branch (or all branches). """
+  """ show revision history of the current branch (or all branches) """
 
   if opts['all']:
     branches = topicBranchNames(repo, opts.get('closed', False))
@@ -504,10 +506,10 @@ def isClean(ui, repo):
 
 ###############################################################################
 def tpush(ui, repo, *args, **opts):
-  """ merge current branch to dev, stage, or production and push it there. """
+  """ merge current branch to dev, stage, or production and push it there """
 
   # Sanity checks
-  if not(onTopicBranch() and isClean()):
+  if not(onTopicBranch(ui, repo) and isClean(ui, repo)):
     return 1
   mergeFrom = repo.dirstate.branch()
 
@@ -597,7 +599,7 @@ def tpush(ui, repo, *args, **opts):
 
 ###############################################################################
 def tclose(ui, repo, *args, **opts):
-  """ close the current topic branch and push to the central repository. """
+  """ close the current topic branch and push to the central repository """
 
   # Sanity check
   if not isClean(ui, repo):
