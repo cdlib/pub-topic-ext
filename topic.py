@@ -21,6 +21,22 @@ def ruleError(ui, message):
 
 
 #################################################################################
+def isTopicRepo(repo):
+  """ Check if the given repo is likely a topic repo. """
+
+  bm = repo.branchmap()
+  return 'dev' in bm and 'stage' in bm and 'prod' in bm
+
+
+#################################################################################
+def mustBeTopicRepo(repo):
+  """ Abort if the given repo isn't a topic repo. """
+
+  if not isTopicRepo(repo):
+    raise util.Abort("This doesn't appear to be a topic repository.")
+
+
+#################################################################################
 def checkTabs(ui, repo, node):
 
   fp = StringIO()
@@ -130,6 +146,10 @@ def validateChangegroup(ui, repo, hooktype, **opts):
   """ pretxnchangegroup hook: perform content-specific checks before accepting 
       an incoming changegroup. """
 
+  # Silently skip this for non-topic repos
+  if not isTopicRepo(repo):
+    return 0
+
   # Check each incoming commit to make sure it meets our rules
   for ctx in [repo[n] for n in range(int(repo[opts['node']]), len(repo))]:
     #print int(ctx), ctx.branch(), ctx.description()
@@ -150,10 +170,18 @@ def repushChangegroup(ui, repo, hooktype, **opts):
   """ changegroup hook: if pushing to dev/stage/prod branch, push the stuff
       further on to the appropriate server. """
 
+  # Silently skip this for non-topic repos
+  if not isTopicRepo(repo):
+    return 0
+
+  # Figure out all the branches that were affected by the changesets.
   branchesChanged = set()
   for ctx in [repo[n] for n in range(int(repo[opts['node']]), len(repo))]:
     branchesChanged.add(ctx.branch())
 
+  # Now check if any "repush-X" config entries are present, where X is
+  # a matching branch name.
+  #
   for branch in sorted(branchesChanged):
     repushTarget = ui.config('topic', 'repush-'+branch)
     if repushTarget:
@@ -168,12 +196,18 @@ def autoUpdate(ui, repo, hooktype, **opts):
   """ changegroup hook: if a push arrives with changes to the current branch,
       update it automatically. """
 
+  # Silently skip this for non-topic repos
+  if not isTopicRepo(repo):
+    return 0
+
+  # See if any of the changesets affects our current branch
   thisBranch = repo.dirstate.branch()
   needUpdate = False
   for ctx in [repo[n] for n in range(int(repo[opts['node']]), len(repo))]:
     if ctx.branch() == thisBranch:
       needUpdate = True
   
+  # If changes to our branch were found, do an update.
   if needUpdate:
     ui.status("Auto-update on branch %s\n" % thisBranch)
     commands.update(ui, repo, node = thisBranch)
@@ -185,6 +219,10 @@ def validateCommit(ui, repo, node, *args, **kwargs):
 
   """ pretxncommit hook: perform content-specific checks before accepting 
       a commit """
+
+  # Silently skip this for non-topic repos
+  if not isTopicRepo(repo):
+    return 0
 
   # Check for any tabs being added in any file. They're not allowd.
   if not checkTabs(ui, repo, node):
@@ -291,6 +329,8 @@ def tbranch(ui, repo, *args, **opts):
 
   """ show current branch status, switch to a different branch, or create a branch """
 
+  mustBeTopicRepo(repo)
+
   if len(args) < 1:
     ui.status("Current branch: %s\n" % repo.dirstate.branch())
     ui.status("        Status: %s\n" % calcBranchState(repo, repo.dirstate.branch(), repo[repo.dirstate.parents()[0]]))
@@ -378,6 +418,8 @@ def topicBranchNames(repo, closed = False):
 def tbranches(ui, repo, *args, **kwargs):
   """ show recent activity on the currently open topic branches """
 
+  mustBeTopicRepo(repo)
+
   closed = kwargs.get('closed', False)
 
   # Process each branch
@@ -401,6 +443,8 @@ def tbranches(ui, repo, *args, **kwargs):
 #################################################################################
 def tlog(ui, repo, *pats, **opts):
   """ show revision history of the current branch (or all branches) """
+
+  mustBeTopicRepo(repo)
 
   if opts['all']:
     branches = topicBranchNames(repo, opts.get('closed', False))
@@ -508,6 +552,8 @@ def isClean(ui, repo):
 def tpush(ui, repo, *args, **opts):
   """ merge current branch to dev, stage, or production and push it there """
 
+  mustBeTopicRepo(repo)
+
   # Sanity checks
   if not(onTopicBranch(ui, repo) and isClean(ui, repo)):
     return 1
@@ -600,6 +646,8 @@ def tpush(ui, repo, *args, **opts):
 ###############################################################################
 def tclose(ui, repo, *args, **opts):
   """ close the current topic branch and push to the central repository """
+
+  mustBeTopicRepo(repo)
 
   # Sanity check
   if not isClean(ui, repo):
