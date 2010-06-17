@@ -641,35 +641,6 @@ def tclose(ui, repo, *args, **opts):
 
 
 #################################################################################
-def replacedCommand(orig, ui, *args, **kwargs):
-  """ This is called for commands our extension replaces, like "branch". We
-      print an informative message, or if the "--tforce" option is specified,
-      we go ahead and run the original commands. """
-
-  tforce = kwargs.pop('tforce', None)
-  if tforce:
-    return orig(ui, *args, **kwargs)
-  ui.warn("Command replaced by 'topic-branch' extension.\n"
-          "Use tbranch/tbranches/tpush, or else specify --tforce if you really want the original.\n")
-  return 1
-
-
-#################################################################################
-def uisetup(ui):
-  """ Called by Mercurial to give us a chance to manipulate the ui. """
-
-  # Set replaced commands to print a message unless forced.
-  if False: # Not sure this is really a good idea
-    overrideOpt = [('', 'tforce', None, "override check and run original hg command")]
-    entry = extensions.wrapcommand(commands.table, 'branch', replacedCommand)
-    entry[1].extend(overrideOpt)
-    entry = extensions.wrapcommand(commands.table, 'branches', replacedCommand)
-    entry[1].extend(overrideOpt)
-    entry = extensions.wrapcommand(commands.table, 'push', replacedCommand)
-    entry[1].extend(overrideOpt)
-
-
-#################################################################################
 # Table of commands we're adding.
 #
 cmdtable = {
