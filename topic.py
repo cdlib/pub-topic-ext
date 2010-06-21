@@ -330,7 +330,13 @@ def topen(ui, repo, *args, **opts):
 
   mustBeTopicRepo(repo)
 
-  if len(args) < 1:
+  if 'tmenu' in opts:
+    resp = ui.prompt("Name for new branch:", None)
+    if not resp:
+      return 1
+    args = [resp]
+
+  elif len(args) < 1:
     ui.warn("Error: You must specify a name for the new branch.\n")
     return 1
 
@@ -354,11 +360,40 @@ def tbranch(ui, repo, *args, **opts):
 
   mustBeTopicRepo(repo)
 
+  # If called from the menu, allow user to choose a branch
+  if 'tmenu' in opts:
+    branches = topicBranchNames(repo)
+    if not branches:
+      ui.warn("There are no branches to switch to.\n")
+      return 1
+    branches = sorted(branches)
+
+    ui.status("Branches you can switch to:\n")
+    for i in range(len(branches)):
+      ui.status("  %4d. %s\n" % (i+1, branches[i]))
+
+    resp = ui.prompt("Which one (1-%d): " % len(branches), '')
+    found = None
+    i = 0
+    while i < len(branches):
+      if str(i+1) == resp:
+        found = branches[i]
+        break
+      i += 1
+    if not found:
+      ui.warn("Unknown number '%s'\n" % resp)
+      return 1
+
+    ui.status("Switching to branch: %s\n" % branches[i])
+    args = [branches[i]]
+
+  # If no branch specified, show the status of the current branch.
   if len(args) < 1:
     ui.status("Current branch: %s\n" % repo.dirstate.branch())
     ui.status("        Status: %s\n" % calcBranchState(repo, repo.dirstate.branch(), repo[repo.dirstate.parents()[0]]))
     return
 
+  # Otherwise, switch to a different (existing) branch
   target = args[0]
   if target == repo.dirstate.branch():
     ui.status("You're already on that branch.\n")
@@ -427,7 +462,12 @@ def topicBranches(repo, closed = False):
 def topicBranchNames(repo, closed = False):
   """ Return a list of the open topic branches. """
 
-  return [tup[0] for tup in topicBranches(repo, closed)]
+  ret = [tup[0] for tup in topicBranches(repo, closed)]
+
+  rb = repo.dirstate.branch()
+  if rb not in ret and rb not in ('dev', 'stage', 'prod', 'default'):
+    ret.insert(0, repo.dirstate.branch())
+  return ret
 
 
 #################################################################################
@@ -440,9 +480,11 @@ def tbranches(ui, repo, *args, **kwargs):
 
   # Process each branch
   toPrint = []
+  branches = set()
   for (branch, ctx) in topicBranches(repo, closed):
 
     # Determine all the field values we're going to print
+    branches.add(branch)
     user = util.shortuser(ctx.user())
     date = util.shortdate(ctx.date())
     branchState = calcBranchState(repo, branch, ctx)
@@ -453,6 +495,10 @@ def tbranches(ui, repo, *args, **kwargs):
 
     toPrint.append((branch, user, date, branchState, descrip))
 
+  if repo.dirstate.branch() not in branches and \
+     repo.dirstate.branch() not in ('dev', 'stage', 'prod', '', 'default'):
+    toPrint.insert(0, (repo.dirstate.branch(), 'n/a', 'n/a', '*local', '<working directory>'))
+
   printColumns(ui, ('Branch', 'Who', 'When', 'Where', 'Description'), toPrint)
 
 
@@ -461,6 +507,10 @@ def tlog(ui, repo, *pats, **opts):
   """ show revision history of the current branch (or all branches) """
 
   mustBeTopicRepo(repo)
+
+  # If called from menu, substitute appropriate options
+  if 'tmenu' in opts:
+    opts = {'all':False}
 
   if opts['all']:
     branches = topicBranchNames(repo, opts.get('closed', False))
@@ -476,7 +526,10 @@ def tlog(ui, repo, *pats, **opts):
     ui.status("%s\n" % ("=" * len(str)))
 
     if not branch in repo.branchmap():
-      ui.status("<unknown>\n")
+      if branch == repo.dirstate.branch():
+        ui.status("<not yet committed>\n")
+      else:
+        ui.status("<unknown>\n")
       continue
 
     toPrint = []
@@ -519,27 +572,22 @@ def tryCommand(ui, descrip, commandFunc):
   (sys.stdout, sys.stderr) = (buffer, buffer)
 
   # Now run the command
-  ok = False
+  res = 1
   try:
 
     res = commandFunc()
-    ok = True
 
   finally:
 
     # Restore in/out streams
     (sys.stdout, sys.stderr) = (oldStdout, oldStderr)
-    outFunc = ui.warn if not ok else ui.note
+    outFunc = ui.warn if res else ui.note
     outFunc("\n")
     for line in buffer.getvalue().split("\n"):
       outFunc("    " + line + "\n")
 
-  # If something went wrong, print it out
-  if res: 
-    return res
-
-  # Otherwise, tell the caller it went fine
-  return 0
+  # All done; let the caller know how it went.
+  return res
 
 
 ###############################################################################
@@ -575,7 +623,18 @@ def tpush(ui, repo, *args, **opts):
     return 1
   mergeFrom = repo.dirstate.branch()
 
-  if len(args) < 1:
+  # If called from the menu, allow user to choose target branch
+  if 'tmenu' in opts:
+    resp = ui.prompt("Which one [DSP]:", "")
+    if resp.upper() not in ('D', 'S', 'P'):
+      ui.warn("Unknown push target '%s'" % resp)
+      return 1
+    resp = resp.upper()
+    args = ['dev' if resp=='D' else 'stage' if resp == 'S' else 'prod']
+    opts = { 'nopull':False, 'nocommit':False, 'message':None }
+
+  # Make sure a branch to push to was specified
+  elif len(args) < 1:
     ui.warn("Error: You must specify at least one branch (dev/stage/prod) to push to.\n")
     return 1
 
@@ -681,6 +740,11 @@ def tclose(ui, repo, *args, **opts):
       ui.warn("Error: %s is not an open topic branch\n" % branch)
       return 1
 
+  if 'tmenu' in opts:
+    if ui.prompt("Branch '%s': close it?" % branches[0]).upper() != 'Y':
+      return 1
+    opts = {}
+
   for branch in branches:
 
     if branch != repo.dirstate.branch():
@@ -701,6 +765,10 @@ def tclose(ui, repo, *args, **opts):
     if tryCommand(ui, "push -b %s ... " % branch, lambda:commands.push(ui, repo, branch=(branch,), **opts)):
       return 1
 
+  # Finally, update to dev to avoid confusingly re-opening the closed branch
+  if tryCommand(ui, "update dev ... ", lambda:commands.update(ui, repo, node='dev', **opts)):
+    return 1
+
   ui.status("done.\n")
 
 
@@ -708,8 +776,67 @@ def tclose(ui, repo, *args, **opts):
 def tmenu(ui, repo, *args, **opts):
   """ menu-driven interface to the 'topic' extension """
 
-  
-  
+  menuEntries = [('O', topen,     "Open new branch"),
+                 ('L', tlog,      "Log (history)"),
+                 ('P', tpush,     "Push to dev/stage/prod"),
+                 ('C', tclose,    "Close branch"),
+                 ('S', tbranches, "Show open branches"),
+                 ('B', tbranch,   "Branch switch"),
+                 ('Q', None,      "Quit menu")]
+  cols = ([], [])
+  colSizes = [0, 0]
+  colNum = 0
+  div = len(menuEntries) / 2
+  for i in range(len(menuEntries)):
+    ent = menuEntries[i]
+    str = "[%c] %s" % (ent[0], ent[2])
+    cols[colNum].append(str)
+    colSizes[colNum] = max(colSizes[colNum], len(str))
+    if i == div:
+      colNum += 1
+  cols[colNum].append("") # in case of odd number
+
+  # Loop until user quits
+  printFull = True
+  while True:
+
+    # Print the whole menu the first time, or after an unknown choice
+    if printFull:
+      ui.status("\n")
+      tbranch(ui, repo)
+      ui.status("\nTopic branch menu:\n\n")
+      for i in range(len(cols[0])):
+        ui.status("    %-*s    %-*s\n" % (colSizes[0], cols[0][i], colSizes[1], cols[1][i]))
+      printFull = False
+
+    allChoices = "".join([ent[0] for ent in menuEntries])
+    resp = ui.prompt("\nCommand [%s or ?]:" % allChoices, default='')
+
+    # Handle quit separately
+    if resp.upper() == 'Q':
+      quit = True
+      break
+
+    # Handle '?'
+    if resp == '?' or resp == '':
+      printFull = True
+      continue
+
+    # Execute the corresponding command
+    found = [ent for ent in menuEntries if resp.upper() == ent[0]]
+    if found:
+      # Add an option so the command can prompt for additional info if necessary
+      ui.status(found[0][2] + "\n")
+      try:
+        found[0][1](ui, repo, tmenu = True)
+      except Exception, e:
+        ui.warn("Error: ")
+        ui.warn(e)
+        ui.warn("\n")
+    else:
+      ui.status("Unknown option: '%s'\n" % resp)
+      printFull = True
+
 
 #################################################################################
 # Table of commands we're adding.
