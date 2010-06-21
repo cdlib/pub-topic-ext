@@ -325,9 +325,32 @@ def calcBranchState(repo, branch, ctx):
 
 
 #################################################################################
+def topen(ui, repo, *args, **opts):
+  """ open (create) a new topic branch """
+
+  mustBeTopicRepo(repo)
+
+  if len(args) < 1:
+    ui.warn("Error: You must specify a name for the new branch.\n")
+    return 1
+
+  target = args[0]
+  if target in topicBranchNames(repo, closed=True) + ['dev', 'prod', 'stage']:
+    ui.warn("Error: a branch with that name already exists; try choosing a different name.\n")
+    return 1
+
+  if repo.dirstate.branch() != 'dev':
+    ui.status("Branching from dev...\n")
+    res = commands.update(ui, repo, node='dev', check=True)
+    if res: return res
+
+  return commands.branch(ui, repo, target)
+
+
+#################################################################################
 def tbranch(ui, repo, *args, **opts):
 
-  """ show current branch status, switch to a different branch, or create a branch """
+  """ show current branch status or switch to a different branch """
 
   mustBeTopicRepo(repo)
 
@@ -341,21 +364,14 @@ def tbranch(ui, repo, *args, **opts):
     ui.status("You're already on that branch.\n")
     return
 
-  if target in topicBranchNames(repo, closed=True) + ['dev', 'prod', 'stage']:
-    return commands.update(ui, repo, 
-                           node = target, 
-                           check = not opts.get('clean', False),
-                           clean = opts.get('clean', False))
-
-  if ui.prompt("Create new branch '%s'?" % target) != 'y':
+  if not target in topicBranchNames(repo, closed=True) + ['dev', 'prod', 'stage']:
+    ui.warn("Error: branch '%s' does not exist.\n" % target)
     return 1
 
-  if repo.dirstate.branch() != 'dev':
-    ui.status("Branching from dev...\n")
-    res = commands.update(ui, repo, node='dev', check=True)
-    if res: return res
-
-  return commands.branch(ui, repo, target)
+  return commands.update(ui, repo, 
+                         node = target, 
+                         check = not opts.get('clean', False),
+                         clean = opts.get('clean', False))
 
 
 #################################################################################
@@ -688,13 +704,24 @@ def tclose(ui, repo, *args, **opts):
   ui.status("done.\n")
 
 
+###############################################################################
+def tmenu(ui, repo, *args, **opts):
+  """ menu-driven interface to the 'topic' extension """
+
+  
+  
+
 #################################################################################
 # Table of commands we're adding.
 #
 cmdtable = {
+    "topen|tnew":    (topen,
+                      [('C', 'clean', None, 'discard uncommitted changes (no backup)')],
+                      "newbranchname"),
+
     "tbranch|tb":    (tbranch,
                       [('C', 'clean', None, 'discard uncommitted changes (no backup)')],
-                      "[branch]"),
+                      "[branchname]"),
 
     "tbranches|tbs": (tbranches,
                       [('c', 'closed', None, "include closed branches")],
@@ -717,6 +744,10 @@ cmdtable = {
                       [('m', 'message',   None, "use <text> as commit message instead of default 'Closing <branch>'")]
                       + commands.remoteopts,
                       "[branches]"),
+
+    "tmenu":         (tmenu,
+                      [],
+                      ""),
 
 }
 
