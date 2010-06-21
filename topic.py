@@ -830,6 +830,10 @@ def tmenu(ui, repo, *args, **opts):
       try:
         found[0][1](ui, repo, tmenu = True)
       except Exception, e:
+        try:
+          while True: ui.popbuffer()
+        except Exception:
+          pass
         ui.warn("Error: ")
         ui.warn(e)
         ui.warn("\n")
