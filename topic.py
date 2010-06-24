@@ -66,9 +66,18 @@ def checkXML(ui, repo, node):
       continue
     if data.startswith("<?xml "):
       try:
+        # Get rid of DTD declaration, since we don't care if it exists or not.
+        data = re.sub("<!DOCTYPE [^>]*>", "", data)
+
+        # Now try to parse it
         sax.parseString(data, sax.ContentHandler())
+
+      # Inform the user if anything goes wrong, and reject the file.
       except Exception as e:
-        return ruleError(ui, "XML file '%s' is not well formed. Parse error: %s\n" % (filename, str(e)))
+        msg = str(e)
+        msg = msg.replace("<unknown>:", "location ")
+        return ruleError(ui, "XML file '%s' may not be well formed. %s: %s\n" % \
+          (filename, e.__class__.__name__, msg))
 
   return True
 
@@ -225,8 +234,9 @@ def validateCommit(ui, repo, node, *args, **kwargs):
     return 0
 
   # Check for any tabs being added in any file. They're not allowd.
-  if not checkTabs(ui, repo, node):
-    return True # abort
+  # MH: This is too stringent for now, need to approve this change with everybody.
+  #if not checkTabs(ui, repo, node):
+  #  return True # abort
 
   # XML must be well-formed
   if not checkXML(ui, repo, node):
