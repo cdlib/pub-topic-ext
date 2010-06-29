@@ -5,12 +5,14 @@
 Extensions for eScholarship-style topic branches.
 '''
 
-import copy, os, re, sys
+import copy, os, re, signal, sys
 from xml import sax
 from StringIO import StringIO
 from mercurial import cmdutil, commands, extensions, hg, patch, url, util
 from mercurial.node import nullid, nullrev
 
+# Tells whether tmenu is waiting for keyboard input
+waitingForInput = None
 
 #################################################################################
 def ruleError(ui, message):
@@ -806,8 +808,24 @@ def tclose(ui, repo, *args, **opts):
 
 
 ###############################################################################
+def sighandler(signum, frame):
+  """ Called periodically during tmenu keyboard input to determine if the
+      repository dir has changed. """
+
+  global waitingForInput
+
+  if waitingForInput:
+    if os.path.getmtime(waitingForInput.path) != waitingForInput.tmenuTime:
+      sys.stderr.write("Restarting tmenu: Underlying repository has changed.\n")
+      os.execl(sys.argv[0], sys.argv[0], "tmenu")
+    signal.alarm(1)
+
+
+###############################################################################
 def tmenu(ui, repo, *args, **opts):
   """ menu-driven interface to the 'topic' extension """
+
+  global waitingForInput
 
   menuEntries = [('O', topen,     "Open new branch"),
                  ('L', tlog,      "Log (history)"),
@@ -830,7 +848,7 @@ def tmenu(ui, repo, *args, **opts):
   cols[colNum].append("") # in case of odd number
 
   # Loop until user quits
-  printFull = True
+  printFull = (len(args) == 0)
   while True:
 
     # Print the whole menu the first time, or after an unknown choice
@@ -842,8 +860,26 @@ def tmenu(ui, repo, *args, **opts):
         ui.status("    %-*s    %-*s\n" % (colSizes[0], cols[0][i], colSizes[1], cols[1][i]))
       printFull = False
 
-    allChoices = "".join([ent[0] for ent in menuEntries])
-    resp = ui.prompt("\nCommand [%s or ?]:" % allChoices, default='')
+    # Monitor the repository directory for changes which would
+    # invalidate our state.
+    #
+    signal.signal(signal.SIGALRM, sighandler)
+    signal.alarm(1) # check once a second
+
+    # Now get the user's choice
+    if len(args):
+      args = list(args)
+      resp = args.pop(0)
+    else:
+      try:
+        allChoices = "".join([ent[0] for ent in menuEntries])
+        waitingForInput = repo
+        repo.tmenuTime = os.path.getmtime(repo.path)
+        resp = ui.prompt("\nCommand [%s or ?]:" % allChoices, default='')
+      finally:
+        # Disable the directory state checker
+        signal.alarm(0)
+        waitingForInput = False
 
     # Handle quit separately
     if resp.upper() == 'Q':
