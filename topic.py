@@ -5,7 +5,7 @@
 Extensions for eScholarship-style topic branches.
 '''
 
-import os, re, sys
+import copy, os, re, sys
 from xml import sax
 from StringIO import StringIO
 from mercurial import cmdutil, commands, extensions, hg, patch, url, util
@@ -132,7 +132,12 @@ def checkBranch(ui, repo, node):
       branchMap = repo.branchmap()
       assert reqPred in branchMap
       reqHead = branchMap[reqPred][0]
-      ancestor = repo[reqHead].ancestor(ctx)
+      ancestor = repo[reqHead].ancestor(parent2)
+
+      #print "ctx:", str(ctx), int(ctx)
+      #print "parent1:", str(parent1), int(parent2)
+      #print "reqHead:", str(repo[reqHead]), int(repo[reqHead])
+      #print "ancestor:", str(ancestor), int(ancestor)
 
       # If there have been changes to the feature since the last merge to the predecessor,
       # that means somebody forgot to do the missing merge.
@@ -571,13 +576,22 @@ def tlog(ui, repo, *pats, **opts):
 def tryCommand(ui, descrip, commandFunc):
   """ Run a command and capture its output. Print the output only if it fails. """
 
-  ui.status(descrip)
+  ui.status("  hg %s\n" % descrip)
   ui.flush()
 
   # For some reason push isn't responsive to ui.pushbuffer, so we have to work
   # harder to grab its output.
   #
-  buffer = StringIO()
+  class Grabber(StringIO):
+    def __init__(self, echoTo):
+      StringIO.__init__(self)
+      self.echoTo = echoTo
+    def write(self, str):
+      if self.echoTo:
+        self.echoTo.write("    " + str)
+      StringIO.write(self, str)
+
+  buffer = Grabber(sys.stdout if ui.verbose else None)
   (oldStdout, oldStderr) = (sys.stdout, sys.stderr)
   (sys.stdout, sys.stderr) = (buffer, buffer)
 
@@ -591,7 +605,7 @@ def tryCommand(ui, descrip, commandFunc):
 
     # Restore in/out streams
     (sys.stdout, sys.stderr) = (oldStdout, oldStderr)
-    outFunc = ui.warn if res else ui.note
+    outFunc = ui.warn if res and not ui.verbose else lambda x: x
     outFunc("\n")
     for line in buffer.getvalue().split("\n"):
       outFunc("    " + line + "\n")
@@ -635,12 +649,19 @@ def tpush(ui, repo, *args, **opts):
 
   # If called from the menu, allow user to choose target branch
   if 'tmenu' in opts:
-    resp = ui.prompt("Which one [DSP]:", "")
-    if resp.upper() not in ('D', 'S', 'P'):
-      ui.warn("Unknown push target '%s'" % resp)
-      return 1
+    resp = ui.prompt("Which branch(es) [DSP]:", "")
+
+    for c in resp:
+      if c.upper() not in ('D', 'S', 'P'):
+        ui.warn("Unknown push target '%s'" % resp)
+        return 1
+
     resp = resp.upper()
-    args = ['dev' if resp=='D' else 'stage' if resp == 'S' else 'prod']
+    args = []
+    if 'D' in resp: args.append('dev')
+    if 'S' in resp: args.append('stage')
+    if 'P' in resp: args.append('prod')
+
     opts = { 'nopull':False, 'nocommit':False, 'message':None }
 
   # Make sure a branch to push to was specified
@@ -672,23 +693,23 @@ def tpush(ui, repo, *args, **opts):
   # Okay, let's go for it.
   try:
 
-    for mergeTo in args:
+    # Pull new changes from the central repo
+    if not opts['nopull'] and not pulled and set(args) - alreadyMerged:
+      if tryCommand(ui, "pull", lambda:commands.pull(ui, repo, **opts)):
+        return 1
+      pulled = True
 
-      # Pull new changes from the central repo
-      if not opts['nopull'] and not pulled and set(args) - alreadyMerged:
-        if tryCommand(ui, "pull ... ", lambda:commands.pull(ui, repo, **opts)):
-          return 1
-        pulled = True
+    for mergeTo in args:
 
       # Merge if necessary
       if not mergeTo in alreadyMerged:
 
         # Update to the branch we're going to merge into
-        if tryCommand(ui, "update %s ... " % mergeTo, lambda:hg.update(repo, mergeTo)):
+        if tryCommand(ui, "update %s" % mergeTo, lambda:hg.update(repo, mergeTo)):
           return 1
 
         # Merge it.
-        if tryCommand(ui, "merge %s ... " % mergeFrom, lambda:hg.merge(repo, mergeFrom)):
+        if tryCommand(ui, "merge %s" % mergeFrom, lambda:hg.merge(repo, mergeFrom)):
           return 1
 
         # Stop if requested.
@@ -703,22 +724,22 @@ def tpush(ui, repo, *args, **opts):
           text = "Merge %s to %s" % (mergeFrom, mergeTo)
 
         # Commit the merge.
-        if tryCommand(ui, "commit ... ", lambda:repo.commit(text) is None):
+        if tryCommand(ui, "commit", lambda:repo.commit(text) is None):
           return 1
 
-      # Push to the central server
-      pushOpts = opts
-      pushOpts['force'] = True # we very often create new branches and it's okay!
-      if tryCommand(ui, "push -fb %s ... " % mergeTo, 
-                    lambda:commands.push(ui, repo, branch=(mergeTo,), **pushOpts)):
-        return 1
+    # Push to the central server
+    pushOpts = copy.deepcopy(opts)
+    pushOpts['force'] = True # we very often create new branches and it's okay!
+    if tryCommand(ui, "push -f -b %s" % (" -b ".join(args)), 
+                  lambda:commands.push(ui, repo, branch=args, **pushOpts)):
+      return 1
 
     # And return to the original topic branch
     if repo.dirstate.branch() != mergeFrom:
-      if tryCommand(ui, "update %s ... " % mergeFrom, lambda:hg.update(repo, mergeFrom)):
+      if tryCommand(ui, "update %s" % mergeFrom, lambda:hg.update(repo, mergeFrom)):
         return 1
 
-    ui.status("done.\n")
+    ui.status("Done.\n")
 
   # When all done, return to the original topic branch (even if something went wrong)
   finally:
@@ -758,7 +779,7 @@ def tclose(ui, repo, *args, **opts):
   for branch in branches:
 
     if branch != repo.dirstate.branch():
-      if tryCommand(ui, "update %s ... " % branch, lambda:commands.update(ui, repo, node=branch)):
+      if tryCommand(ui, "update %s" % branch, lambda:commands.update(ui, repo, node=branch)):
         return 1
 
     # Unlike a normal hg commit, if no text is specified we supply a reasonable default.
@@ -768,18 +789,20 @@ def tclose(ui, repo, *args, **opts):
       text = "Closing %s" % branch
 
     # Close it
-    if tryCommand(ui, "commit --close-branch ... ", lambda:repo.commit(text, extra = {'close':'True'}) is None):
+    if tryCommand(ui, "commit --close-branch", lambda:repo.commit(text, extra = {'close':'True'}) is None):
       return 1
 
     # And push.
-    if tryCommand(ui, "push -b %s ... " % branch, lambda:commands.push(ui, repo, branch=(branch,), **opts)):
+    pushOpts = copy.deepcopy(opts)
+    pushOpts['force'] = True
+    if tryCommand(ui, "push -f -b %s" % branch, lambda:commands.push(ui, repo, branch=(branch,), **pushOpts)):
       return 1
 
   # Finally, update to dev to avoid confusingly re-opening the closed branch
-  if tryCommand(ui, "update dev ... ", lambda:commands.update(ui, repo, node='dev', **opts)):
+  if tryCommand(ui, "update dev", lambda:commands.update(ui, repo, node='dev', **opts)):
     return 1
 
-  ui.status("done.\n")
+  ui.status("Done.\n")
 
 
 ###############################################################################
