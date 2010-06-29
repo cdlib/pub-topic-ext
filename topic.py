@@ -8,7 +8,7 @@ Extensions for eScholarship-style topic branches.
 import copy, os, re, sys
 from xml import sax
 from StringIO import StringIO
-from mercurial import cmdutil, commands, extensions, hg, patch, url, util
+from mercurial import cmdutil, commands, dispatch, extensions, hg, patch, url, util
 from mercurial.node import nullid, nullrev
 
 #################################################################################
@@ -853,9 +853,9 @@ def tmenu(ui, repo, *args, **opts):
       resp = ui.prompt("\nCommand [%s or ?]:" % allChoices, default='')
       repoTimeAfter = os.path.getmtime(repo.path)
       if repoTimeBefore != repoTimeAfter:
-        sys.stderr.write("(restarting tmenu: underlying repository has changed.)\n")
-        sys.stderr.flush()
-        os.execl(sys.argv[0], sys.argv[0], "tmenu", resp)
+        ui.warn("  (refreshing changed repository)\n")
+        sys.argv = [sys.argv[0], 'tmenu', resp]
+        dispatch.run()
 
     # Handle quit separately
     if resp.upper() == 'Q':
