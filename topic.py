@@ -237,6 +237,13 @@ def validateCommit(ui, repo, node, *args, **kwargs):
   if not isTopicRepo(repo):
     return 0
 
+  # If the committer knows what s/he is doing, allow this to go through without
+  # any checks.
+  #
+  ctx = repo[node]
+  if "NO_TOPIC_VALIDATE" in ctx.description():
+    return False # no problems
+
   # Check for any tabs being added in any file. They're not allowd.
   # MH: This is too stringent for now, need to approve this change with everybody.
   #if not checkTabs(ui, repo, node):
