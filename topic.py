@@ -736,7 +736,7 @@ def tpush(ui, repo, *args, **opts):
     # Push to the central server
     pushOpts = copy.deepcopy(opts)
     pushOpts['force'] = True # we very often create new branches and it's okay!
-    if tryCommand(ui, "push -f -b %s" % (" -b ".join(args)), 
+    if tryCommand(ui, "push -f -b \"%s\"" % ("\" -b \"".join(args)), 
                   lambda:commands.push(ui, repo, branch=args, **pushOpts)):
       return 1
 
@@ -801,7 +801,7 @@ def tclose(ui, repo, *args, **opts):
     # And push.
     pushOpts = copy.deepcopy(opts)
     pushOpts['force'] = True
-    if tryCommand(ui, "push -f -b %s" % branch, lambda:commands.push(ui, repo, branch=(branch,), **pushOpts)):
+    if tryCommand(ui, "push -f -b \"%s\"" % branch, lambda:commands.push(ui, repo, branch=(branch,), **pushOpts)):
       return 1
 
   # Finally, update to dev to avoid confusingly re-opening the closed branch
