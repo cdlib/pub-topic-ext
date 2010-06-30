@@ -163,6 +163,13 @@ def validateChangegroup(ui, repo, hooktype, **opts):
   if not isTopicRepo(repo):
     return 0
 
+  # If the committer knows what s/he is doing, allow this to go through without
+  # any checks.
+  #
+  for ctx in [repo[n] for n in range(int(repo[opts['node']]), len(repo))]:
+    if "NO_TOPIC_VALIDATE" in ctx.description():
+      return 0 # no problems
+
   # Check each incoming commit to make sure it meets our rules
   for ctx in [repo[n] for n in range(int(repo[opts['node']]), len(repo))]:
     #print int(ctx), ctx.branch(), ctx.description()
