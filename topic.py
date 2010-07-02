@@ -662,7 +662,7 @@ def tpush(ui, repo, *args, **opts):
 
   # If called from the menu, allow user to choose target branch
   if 'tmenu' in opts:
-    resp = ui.prompt("Which branch(es) [DSP]:", "")
+    resp = ui.prompt("Which branch(es) [dsp]:", "")
 
     for c in resp:
       if c.upper() not in ('D', 'S', 'P'):
@@ -824,13 +824,13 @@ def tmenu(ui, repo, *args, **opts):
 
   global waitingForInput
 
-  menuEntries = [('O', topen,     "Open new branch"),
-                 ('L', tlog,      "Log (history)"),
-                 ('P', tpush,     "Push to dev/stage/prod"),
-                 ('C', tclose,    "Close branch"),
-                 ('S', tbranches, "Show open branches"),
-                 ('B', tbranch,   "Branch switch"),
-                 ('Q', None,      "Quit menu")]
+  menuEntries = [('o', topen,     "open new branch"),
+                 ('l', tlog,      "log (history)"),
+                 ('p', tpush,     "push to dev/stage/prod"),
+                 ('c', tclose,    "close branch"),
+                 ('s', tbranches, "show open branches"),
+                 ('b', tbranch,   "branch switch"),
+                 ('q', None,      "quit menu")]
   cols = ([], [])
   colSizes = [0, 0]
   colNum = 0
@@ -882,7 +882,7 @@ def tmenu(ui, repo, *args, **opts):
       continue
 
     # Execute the corresponding command
-    found = [ent for ent in menuEntries if resp.upper() == ent[0]]
+    found = [ent for ent in menuEntries if resp.upper() == ent[0].upper()]
     if found:
       # Add an option so the command can prompt for additional info if necessary
       ui.status(found[0][2] + "\n")
