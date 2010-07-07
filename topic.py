@@ -105,9 +105,12 @@ def checkBranch(ui, repo, node):
   if len(repo.branchmap()[thisBranch]) > 1:
     return ruleError(ui, "Not allowed to create multiple heads in the same branch. Did you forget to merge?")
 
-  # New branches may only branch from dev.
-  if thisBranch != p1Branch and p1Branch != 'dev':
-    return ruleError(ui, "Topics are only allowed to branch from dev directly.")
+  # New branches may only branch from prod.
+  if thisBranch != p1Branch and p1Branch != 'prod':
+
+    # Previously we allowed branching from dev; no longer.
+    if util.shortdate(ctx.date()) >= "2010-07-07":
+      return ruleError(ui, "Topics are only allowed to branch from prod directly.")
 
   isMerge = parent1 and parent2
   if isMerge:
@@ -373,9 +376,9 @@ def topen(ui, repo, *args, **opts):
     ui.warn("Error: a branch with that name already exists; try choosing a different name.\n")
     return 1
 
-  if repo.dirstate.branch() != 'dev':
-    ui.status("Branching from dev...\n")
-    res = commands.update(ui, repo, node='dev', check=True)
+  if repo.dirstate.branch() != 'prod':
+    ui.status("Branching from prod...\n")
+    res = commands.update(ui, repo, node='prod', check=True)
     if res: return res
 
   return commands.branch(ui, repo, target)
@@ -650,6 +653,15 @@ def isClean(ui, repo):
 
 
 ###############################################################################
+def quoteBranch(name):
+  """ If the given name needs quoting for regular shell use, quote it now. """
+
+  if re.search("[^a-zA-Z0-9.-_]", name):
+    return '"%s"' % name
+  return name
+
+
+###############################################################################
 def tpush(ui, repo, *args, **opts):
   """ merge current branch to dev, stage, or production and push it there """
 
@@ -718,11 +730,11 @@ def tpush(ui, repo, *args, **opts):
       if not mergeTo in alreadyMerged:
 
         # Update to the branch we're going to merge into
-        if tryCommand(ui, "update %s" % mergeTo, lambda:hg.update(repo, mergeTo)):
+        if tryCommand(ui, "update %s" % quoteBranch(mergeTo), lambda:hg.update(repo, mergeTo)):
           return 1
 
         # Merge it.
-        if tryCommand(ui, "merge %s" % mergeFrom, lambda:hg.merge(repo, mergeFrom)):
+        if tryCommand(ui, "merge %s" % quoteBranch(mergeFrom), lambda:hg.merge(repo, mergeFrom)):
           return 1
 
         # Stop if requested.
@@ -743,13 +755,13 @@ def tpush(ui, repo, *args, **opts):
     # Push to the central server
     pushOpts = copy.deepcopy(opts)
     pushOpts['force'] = True # we very often create new branches and it's okay!
-    if tryCommand(ui, "push -f -b \"%s\"" % ("\" -b \"".join(args)), 
+    if tryCommand(ui, "push -f -b %s" % (" -b ".join([quoteBranch(b) for b in args])), 
                   lambda:commands.push(ui, repo, branch=args, **pushOpts)):
       return 1
 
     # And return to the original topic branch
     if repo.dirstate.branch() != mergeFrom:
-      if tryCommand(ui, "update %s" % mergeFrom, lambda:hg.update(repo, mergeFrom)):
+      if tryCommand(ui, "update %s" % quoteBranch(mergeFrom), lambda:hg.update(repo, mergeFrom)):
         return 1
 
     ui.status("Done.\n")
@@ -792,7 +804,7 @@ def tclose(ui, repo, *args, **opts):
   for branch in branches:
 
     if branch != repo.dirstate.branch():
-      if tryCommand(ui, "update %s" % branch, lambda:commands.update(ui, repo, node=branch)):
+      if tryCommand(ui, "update %s" % quoteBranch(branch), lambda:commands.update(ui, repo, node=branch)):
         return 1
 
     # Unlike a normal hg commit, if no text is specified we supply a reasonable default.
@@ -807,12 +819,14 @@ def tclose(ui, repo, *args, **opts):
 
     # And push.
     pushOpts = copy.deepcopy(opts)
+    if 'message' in pushOpts:
+      del pushOpts['message']
     pushOpts['force'] = True
-    if tryCommand(ui, "push -f -b \"%s\"" % branch, lambda:commands.push(ui, repo, branch=(branch,), **pushOpts)):
+    if tryCommand(ui, "push -f -b %s" % quoteBranch(branch), lambda:commands.push(ui, repo, branch=(branch,), **pushOpts)):
       return 1
 
   # Finally, update to dev to avoid confusingly re-opening the closed branch
-  if tryCommand(ui, "update dev", lambda:commands.update(ui, repo, node='dev', **opts)):
+  if tryCommand(ui, "update prod", lambda:commands.update(ui, repo, node='prod')):
     return 1
 
   ui.status("Done.\n")
