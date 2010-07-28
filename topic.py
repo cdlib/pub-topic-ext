@@ -8,8 +8,14 @@ Extensions for eScholarship-style topic branches.
 import copy, os, re, sys
 from xml import sax
 from StringIO import StringIO
-from mercurial import cmdutil, commands, dispatch, extensions, hg, patch, url, util
+from mercurial import cmdutil, commands, dispatch, extensions, context, hg, patch, url, util
 from mercurial.node import nullid, nullrev
+
+global origCalcFileAncestor, origCalcChangectxAncestor
+
+global ancestorCache
+ancestorCache = {}
+
 
 #################################################################################
 def ruleError(ui, message):
@@ -832,6 +838,63 @@ def tclose(ui, repo, *args, **opts):
   ui.status("Done.\n")
 
 
+
+###############################################################################
+def calcChangectxAncestor(self, ctx2):
+  """ Special context ancestor calculation is needed for our unusual but very
+      regularized merge structure. """
+
+  #print "  changectx.ancestor(%s, %s):" % (str(self), str(ctx2))
+
+  # Only do this for topic repos, and only for merges to dev/stage/prod.
+  if not isTopicRepo(self._repo) or self.branch() not in ('dev', 'stage', 'prod'):
+    return origCalcChangectxAncestor(self, ctx2)
+
+  # Helper function to produce merges into a branch
+  def mergesOf(ctx):
+    while True:
+      parents = ctx.parents()
+      if not parents:
+        break
+      elif len(parents) == 1:
+        ctx = parents[0]
+      else:
+        yield int(parents[1])
+        ctx = parents[0]
+
+  # Find the most recent common merge
+  merges = set()
+  scan1 = mergesOf(self)
+  scan2 = mergesOf(ctx2)
+
+  while True:
+    c = scan1.next()
+    if c in merges:
+      break
+    merges.add(c)
+    
+    c = scan2.next()
+    if c in merges:
+      break
+    merges.add(c)
+
+  return self._repo[c]
+
+
+###############################################################################
+def calcFileAncestor(self, fc2):
+  """ Special file ancestor calculation is needed for our unusual but very
+      regularized merge structure. """
+
+  # Only do this in topic repos, and only if merging to dev/stage/prod
+  if not isTopicRepo(self._repo) or self.changectx().branch() not in ('dev', 'stage', 'prod'):
+    return origCalcChangectxAncestor(self, fc2)
+
+  # Calculate the ancestor context, and use that for the file context
+  ctxa = calcChangectxAncestor(self.changectx(), fc2.changectx())
+  return ctxa.filectx(self.path())
+
+
 ###############################################################################
 def tmenu(ui, repo, *args, **opts):
   """ menu-driven interface to the 'topic' extension """
@@ -913,6 +976,21 @@ def tmenu(ui, repo, *args, **opts):
     else:
       ui.status("Unknown option: '%s'\n" % resp)
       printFull = True
+
+
+#################################################################################
+def uisetup(ui):
+  """ Install extra special handlers for the topic extension. """
+
+  global origCalcFileAncestor, origCalcChangectxAncestor
+
+  origCalcChangectxAncestor = getattr(context.changectx, 'ancestor')
+  assert origCalcChangectxAncestor is not None
+  setattr(context.changectx, 'ancestor', calcChangectxAncestor)
+
+  origCalcFileAncestor = getattr(context.filectx, 'ancestor')
+  assert origCalcFileAncestor is not None
+  setattr(context.filectx, 'ancestor', calcFileAncestor)
 
 
 #################################################################################
