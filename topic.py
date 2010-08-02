@@ -16,6 +16,7 @@ global origCalcFileAncestor, origCalcChangectxAncestor
 global ancestorCache
 ancestorCache = {}
 
+topicVersion = "1.3"
 
 #################################################################################
 def ruleError(ui, message):
@@ -972,7 +973,7 @@ def tmenu(ui, repo, *args, **opts):
     if printFull:
       ui.status("\n")
       tbranch(ui, repo)
-      ui.status("\nTopic branch menu:\n\n")
+      ui.status("\nTopic branch menu (v%s):\n\n" % topicVersion)
       for i in range(len(cols[0])):
         ui.status("    %-*s    %-*s\n" % (colSizes[0], cols[0][i], colSizes[1], cols[1][i]))
       printFull = False
@@ -1020,6 +1021,12 @@ def tmenu(ui, repo, *args, **opts):
       ui.status("Unknown option: '%s'\n" % resp)
       printFull = True
 
+
+###############################################################################
+def tversion(ui, repo, *args, **opts):
+  """ print out the version of the topic extension """
+
+  ui.status("Topic extension version: %s\n" % topicVersion)
 
 #################################################################################
 def uisetup(ui):
@@ -1074,6 +1081,10 @@ cmdtable = {
                       "[branches]"),
 
     "tmenu":         (tmenu,
+                      [],
+                      ""),
+
+    "tversion":      (tversion,
                       [],
                       ""),
 
