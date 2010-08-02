@@ -1027,8 +1027,8 @@ def uisetup(ui):
 
   global origCalcFileAncestor, origCalcChangectxAncestor
 
-  if os.path.exists("/tmp/disable_new_merge"):
-    return
+  #if os.path.exists("/tmp/disable_new_merge"):
+  #  return
 
   origCalcChangectxAncestor = getattr(context.changectx, 'ancestor')
   assert origCalcChangectxAncestor is not None
