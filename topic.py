@@ -5,7 +5,7 @@
 Extensions for eScholarship-style topic branches.
 '''
 
-import copy, os, re, sys
+import copy, os, re, sys, traceback
 from xml import sax
 from StringIO import StringIO
 from mercurial import cmdutil, commands, dispatch, extensions, context, hg, patch, url, util
@@ -850,35 +850,71 @@ def calcChangectxAncestor(self, ctx2):
   if not isTopicRepo(self._repo) or self.branch() not in ('dev', 'stage', 'prod'):
     return origCalcChangectxAncestor(self, ctx2)
 
-  # Helper function to produce merges into a branch
-  def mergesOf(ctx):
+  # If cached, save some time.
+  cacheKey = (str(self), str(ctx2)) 
+  if cacheKey in ancestorCache:
+    return self._repo[ancestorCache[cacheKey]]
+
+  # Helper function to produce ancestors, following the first parent of merges but
+  # yielding the second parent.
+  #
+  def ancestorsOf(ctx):
+    yield ctx
     while True:
       parents = ctx.parents()
       if not parents:
         break
       elif len(parents) == 1:
+        yield parents[0]
         ctx = parents[0]
       else:
-        yield int(parents[1])
+        yield parents[1]
         ctx = parents[0]
 
-  # Find the most recent common merge
-  merges = set()
-  scan1 = mergesOf(self)
-  scan2 = mergesOf(ctx2)
+  repo = self._repo
+  def ctxint(ctx):
+    if ctx is None: return 0
+    s = re.sub("\+$", "", str(ctx))
+    return str(int(repo[s])) + ("+" if str(ctx).endswith("+") else "")
+
+   # Find the most recent common ancestor
+  ancestors = set()
+  scan1 = ancestorsOf(self)
+  scan2 = ancestorsOf(ctx2)
+
+  minRev = None
+  c1 = scan1.next()
+  c2 = scan2.next()
 
   while True:
-    c = scan1.next()
-    if c in merges:
-      break
-    merges.add(c)
-    
-    c = scan2.next()
-    if c in merges:
-      break
-    merges.add(c)
+    if not minRev or c1 <= minRev:
+      #print "c1:",ctxint(c1)
+      if c1 in ancestors:
+        c = c1
+        break
+      ancestors.add(c1)
+      c1 = scan1.next()
+      minRev = c1
 
-  return self._repo[c]
+    if not minRev or c2 <= minRev:
+      #print "c2:",ctxint(c2)
+      if c2 in ancestors:
+        c = c2
+        break
+      ancestors.add(c2)
+      c2 = scan2.next()
+      minRev = c2
+
+  #orig = None
+  #try:
+  #  orig = origCalcChangectxAncestor(self, ctx2)
+  #except Exception as e:
+  #  pass
+  #print "  ctxancestor(%s,%s)=%s (was %s)" % (ctxint(self), ctxint(ctx2), ctxint(c), ctxint(orig))
+
+  # Cache for future use
+  ancestorCache[cacheKey] = c.node()
+  return c
 
 
 ###############################################################################
@@ -891,7 +927,14 @@ def calcFileAncestor(self, fc2):
     return origCalcChangectxAncestor(self, fc2)
 
   # Calculate the ancestor context, and use that for the file context
+  repo = self._repo
+  def ctxint(ctx):
+    if ctx is None: return 0
+    s = re.sub("\+$", "", str(ctx))
+    return str(int(repo[s])) + ("+" if str(ctx).endswith("+") else "")
   ctxa = calcChangectxAncestor(self.changectx(), fc2.changectx())
+  #print "  fileancestor(%s,%s,%s)=%s (was %s)" % (self.path(), ctxint(self.changectx()), ctxint(fc2.changectx()), \
+  #        ctxint(ctxa), ctxint(origCalcFileAncestor(self, fc2).changectx()))
   return ctxa.filectx(self.path())
 
 
@@ -983,6 +1026,9 @@ def uisetup(ui):
   """ Install extra special handlers for the topic extension. """
 
   global origCalcFileAncestor, origCalcChangectxAncestor
+
+  if os.path.exists("/tmp/disable_new_merge"):
+    return
 
   origCalcChangectxAncestor = getattr(context.changectx, 'ancestor')
   assert origCalcChangectxAncestor is not None
