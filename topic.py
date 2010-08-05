@@ -11,12 +11,12 @@ from StringIO import StringIO
 from mercurial import cmdutil, commands, dispatch, extensions, context, hg, patch, url, util
 from mercurial.node import nullid, nullrev
 
-global origCalcFileAncestor, origCalcChangectxAncestor
+global origCalcChangectxAncestor
 
 global ancestorCache
 ancestorCache = {}
 
-topicVersion = "1.3"
+topicVersion = "1.4"
 
 #################################################################################
 def ruleError(ui, message):
@@ -870,6 +870,7 @@ def calcChangectxAncestor(self, ctx2):
         ctx = parents[0]
       else:
         yield parents[1]
+        yield parents[0]
         ctx = parents[0]
 
   repo = self._repo
@@ -916,27 +917,6 @@ def calcChangectxAncestor(self, ctx2):
   # Cache for future use
   ancestorCache[cacheKey] = c.node()
   return c
-
-
-###############################################################################
-def calcFileAncestor(self, fc2):
-  """ Special file ancestor calculation is needed for our unusual but very
-      regularized merge structure. """
-
-  # Only do this in topic repos, and only if merging to dev/stage/prod
-  if not isTopicRepo(self._repo) or self.changectx().branch() not in ('dev', 'stage', 'prod'):
-    return origCalcChangectxAncestor(self, fc2)
-
-  # Calculate the ancestor context, and use that for the file context
-  repo = self._repo
-  def ctxint(ctx):
-    if ctx is None: return 0
-    s = re.sub("\+$", "", str(ctx))
-    return str(int(repo[s])) + ("+" if str(ctx).endswith("+") else "")
-  ctxa = calcChangectxAncestor(self.changectx(), fc2.changectx())
-  #print "  fileancestor(%s,%s,%s)=%s (was %s)" % (self.path(), ctxint(self.changectx()), ctxint(fc2.changectx()), \
-  #        ctxint(ctxa), ctxint(origCalcFileAncestor(self, fc2).changectx()))
-  return ctxa.filectx(self.path())
 
 
 ###############################################################################
@@ -1040,10 +1020,6 @@ def uisetup(ui):
   origCalcChangectxAncestor = getattr(context.changectx, 'ancestor')
   assert origCalcChangectxAncestor is not None
   setattr(context.changectx, 'ancestor', calcChangectxAncestor)
-
-  origCalcFileAncestor = getattr(context.filectx, 'ancestor')
-  assert origCalcFileAncestor is not None
-  setattr(context.filectx, 'ancestor', calcFileAncestor)
 
 
 #################################################################################
