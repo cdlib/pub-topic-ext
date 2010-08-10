@@ -438,8 +438,13 @@ def tbranch(ui, repo, *args, **opts):
     return
 
   if not target in topicBranchNames(repo, closed=True) + ['dev', 'prod', 'stage']:
-    ui.warn("Error: branch '%s' does not exist.\n" % target)
-    return 1
+    maybes = topicBranchNames(repo) + ['dev', 'prod', 'stage'] # don't check closed branches for maybes
+    matches = [b for b in maybes if target in b]
+    if len(matches) != 1:
+      ui.warn("Error: branch '%s' does not exist.\n" % target)
+      return 1
+    ui.status("(branch %s matches '%s')\n" % (matches[0], target))
+    target = matches[0]
 
   return commands.update(ui, repo, 
                          node = target, 
