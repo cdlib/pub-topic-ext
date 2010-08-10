@@ -990,18 +990,20 @@ def tmenu(ui, repo, *args, **opts):
                  ('c', tclose,    "close branch"),
                  ('s', tbranches, "show open branches"),
                  ('b', tbranch,   "branch switch"),
+                 ('y', tsync,     "sync (pull & upd)"),
                  ('q', None,      "quit menu")]
   cols = ([], [])
   colSizes = [0, 0]
   colNum = 0
-  div = len(menuEntries) / 2
+  div = (len(menuEntries)+1) / 2
   for i in range(len(menuEntries)):
     ent = menuEntries[i]
     str = "[%c] %s" % (ent[0], ent[2])
-    cols[colNum].append(str)
-    colSizes[colNum] = max(colSizes[colNum], len(str))
     if i == div:
       colNum += 1
+    cols[colNum].append(str)
+    print colNum, str
+    colSizes[colNum] = max(colSizes[colNum], len(str))
   cols[colNum].append("") # in case of odd number
 
   # Loop until user quits
