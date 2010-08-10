@@ -16,7 +16,7 @@ global origCalcChangectxAncestor
 global ancestorCache
 ancestorCache = {}
 
-topicVersion = "1.4"
+topicVersion = "1.5"
 
 #################################################################################
 def ruleError(ui, message):
@@ -951,10 +951,38 @@ def ttest(ui, repo, *args, **opts):
   ui.status("Done.")
 
 ###############################################################################
+def tsync(ui, repo, *args, **opts):
+  """ synchronize (pull) the main repository and update; also pull and update
+      the topic extension itself. """
+
+  mustBeTopicRepo(repo)
+
+  # Pull and update the current repo
+  if tryCommand(ui, "pull -u", lambda:commands.pull(ui, repo, **opts)):
+    return 1
+
+  # Then pull and update the topic extension
+  topicDir = os.path.dirname(__file__)
+  timeBefore = os.path.getmtime(os.path.join(topicDir, ".hg"))
+  if tryCommand(ui, "pull -R %s -u" % quoteBranch(topicDir), lambda:os.system('hg pull -R "%s" -u' % topicDir)):
+    return 1
+  timeAfter = os.path.getmtime(os.path.join(topicDir, ".hg"))
+
+  if timeBefore != timeAfter:
+    ui.status("Note: Topic extension has been updated.\n")
+    if 'tmenu' in opts:
+      ui.status("...restarting menu.\n")
+      os.system("hg tmenu")
+      sys.exit(0)
+      
+
+###############################################################################
 def tmenu(ui, repo, *args, **opts):
   """ menu-driven interface to the 'topic' extension """
 
   global waitingForInput
+
+  mustBeTopicRepo(repo)
 
   menuEntries = [('o', topen,     "open new branch"),
                  ('l', tlog,      "log (history)"),
@@ -1090,6 +1118,10 @@ cmdtable = {
                       "[branches]"),
 
     "tmenu":         (tmenu,
+                      [],
+                      ""),
+
+    "tsync":         (tsync,
                       [],
                       ""),
 
