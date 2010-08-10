@@ -5,10 +5,10 @@
 Extensions for eScholarship-style topic branches.
 '''
 
-import copy, os, re, sys, traceback
+import copy, heapq, os, re, sys, traceback
 from xml import sax
 from StringIO import StringIO
-from mercurial import cmdutil, commands, dispatch, extensions, context, hg, patch, url, util
+from mercurial import cmdutil, commands, context, dispatch, extensions, context, hg, patch, url, util
 from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
@@ -845,78 +845,81 @@ def calcChangectxAncestor(self, ctx2):
   """ Special context ancestor calculation is needed for our unusual but very
       regularized merge structure. """
 
-  #print "  changectx.ancestor(%s, %s):" % (str(self), str(ctx2))
-
   # Only do this for topic repos, and only for merges to dev/stage/prod.
   if not isTopicRepo(self._repo) or self.branch() not in ('dev', 'stage', 'prod'):
     return origCalcChangectxAncestor(self, ctx2)
 
   # If cached, save some time.
-  cacheKey = (str(self), str(ctx2)) 
+  cacheKey = (self.node(), ctx2.node())
   if cacheKey in ancestorCache:
-    return self._repo[ancestorCache[cacheKey]]
+    return ancestorCache[cacheKey]
 
-  # Helper function to produce ancestors, following the first parent of merges but
-  # yielding the second parent.
+  print "  changectx.ancestor(%d, %d):" % (self.rev(), ctx2.rev())
+
+  # Handy stuff to have around
+  repo = self._repo
+  changelog = repo.changelog
+
+  # Helper function to produce ancestors. Their rev nums are
+  # produced, highest first.
   #
   def ancestorsOf(ctx):
-    yield ctx
-    while True:
-      parents = ctx.parents()
-      if not parents:
-        break
-      elif len(parents) == 1:
-        yield parents[0]
-        ctx = parents[0]
-      else:
-        yield parents[1]
-        yield parents[0]
-        ctx = parents[0]
 
-  repo = self._repo
-  def ctxint(ctx):
-    if ctx is None: return 0
-    s = re.sub("\+$", "", str(ctx))
-    return str(int(repo[s])) + ("+" if str(ctx).endswith("+") else "")
+    # Deal with workingctx
+    node = ctx.node()
+    if node is None:
+      node = c2.parents()[0].node()
 
-   # Find the most recent common ancestor
+    # Init
+    visit = [-changelog.rev(node)]
+    min = None
+    while len(visit):
+      rev = -heapq.heappop(visit)
+      node = changelog.node(rev)
+
+      # Avoid duplicates
+      if min is not None and rev >= min:
+        continue
+      if min is None or rev < min:
+        min = rev
+
+      # Got one
+      yield rev
+
+      # Add the parent(s) to our list of revisions to visit
+      parents = changelog.parents(node)
+      p1 = changelog.rev(parents[0])
+      heapq.heappush(visit, -p1)
+
+      if not parents[1] == nullrev:
+        p2 = changelog.rev(parents[1])
+        heapq.heappush(visit, -p2)
+
+  # Find the most recent common ancestor by doing a merge-sort
+  # of the two lists until we find the highest matching rev.
+  #
   ancestors = set()
-  scan1 = ancestorsOf(self)
-  scan2 = ancestorsOf(ctx2)
-
-  minRev = None
-  c1 = scan1.next()
-  c2 = scan2.next()
-
+  s1, s2 = ancestorsOf(self), ancestorsOf(ctx2)
+  c1, c2 = s1.next(), s2.next()
   while True:
-    if not minRev or c1 <= minRev:
-      #print "c1:",ctxint(c1)
-      if c1 in ancestors:
-        c = c1
-        break
-      ancestors.add(c1)
-      c1 = scan1.next()
-      minRev = c1
+    if c1 < c2:
+      c1, s1, c2, s2 = c2, s2, c1, s1
+    if c1 in ancestors:
+      break
+    ancestors.add(c1)
+    c1 = s1.next()
 
-    if not minRev or c2 <= minRev:
-      #print "c2:",ctxint(c2)
-      if c2 in ancestors:
-        c = c2
-        break
-      ancestors.add(c2)
-      c2 = scan2.next()
-      minRev = c2
-
-  #orig = None
-  #try:
-  #  orig = origCalcChangectxAncestor(self, ctx2)
-  #except Exception as e:
-  #  pass
-  #print "  ctxancestor(%s,%s)=%s (was %s)" % (ctxint(self), ctxint(ctx2), ctxint(c), ctxint(orig))
+  orig = origCalcChangectxAncestor(self, ctx2)
+  if orig:
+    print "    ctxancestor(%d,%d)=%d (was %d)" % (self.rev(), ctx2.rev(), c1, orig.rev())
+    assert c1 >= orig.rev()
+  else:
+    print "    ctxancestor(%d,%d)=%d (was None)" % (self.rev(), ctx2.rev(), c1)
 
   # Cache for future use
-  ancestorCache[cacheKey] = c.node()
-  return c
+  ret = context.changectx(repo, c1)
+  ancestorCache[cacheKey] = ret
+  return ret
 
 
 ###############################################################################
@@ -1014,12 +1017,10 @@ def uisetup(ui):
 
   global origCalcFileAncestor, origCalcChangectxAncestor
 
-  #if os.path.exists("/tmp/disable_new_merge"):
-  #  return
-
   origCalcChangectxAncestor = getattr(context.changectx, 'ancestor')
   assert origCalcChangectxAncestor is not None
-  setattr(context.changectx, 'ancestor', calcChangectxAncestor)
+  if not os.path.exists("disable_new_merge"): # used for before vs after tests
+    setattr(context.changectx, 'ancestor', calcChangectxAncestor)
 
 
 #################################################################################
