@@ -16,7 +16,7 @@ global origCalcChangectxAncestor
 global ancestorCache
 ancestorCache = {}
 
-topicVersion = "1.5"
+topicVersion = "1.5.1"
 
 #################################################################################
 def ruleError(ui, message):
@@ -1002,7 +1002,6 @@ def tmenu(ui, repo, *args, **opts):
     if i == div:
       colNum += 1
     cols[colNum].append(str)
-    print colNum, str
     colSizes[colNum] = max(colSizes[colNum], len(str))
   cols[colNum].append("") # in case of odd number
 
