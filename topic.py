@@ -16,7 +16,7 @@ global origCalcChangectxAncestor
 global ancestorCache
 ancestorCache = {}
 
-topicVersion = "1.5.2"
+topicVersion = "1.5.3"
 
 #################################################################################
 def ruleError(ui, message):
@@ -929,11 +929,8 @@ def calcChangectxAncestor(self, ctx2):
 
 
 ###############################################################################
-def ttest(ui, repo, *args, **opts):
+def debugtopic(ui, repo, *args, **opts):
   """ internal consistency checks for the topic extension """
-
-  ui.status("Path: %s\n" % __file__)
-  ui.status("Abs:  %s\n" % os.path.abspath(__file__))
 
   ui.status("Checking ancestor algorithm...\n")
   log = repo.changelog
@@ -952,8 +949,7 @@ def ttest(ui, repo, *args, **opts):
 
 ###############################################################################
 def tsync(ui, repo, *args, **opts):
-  """ synchronize (pull) the main repository and update; also pull and update
-      the topic extension itself. """
+  """ synchronize (pull & update) the current repo; also the topic extension itself. """
 
   mustBeTopicRepo(repo)
 
@@ -1126,7 +1122,7 @@ cmdtable = {
                       [],
                       ""),
 
-    "ttest":         (ttest,
+    "debugtopic":    (debugtopic,
                       [],
                       ""),
 
