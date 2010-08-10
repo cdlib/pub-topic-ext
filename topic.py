@@ -932,6 +932,10 @@ def calcChangectxAncestor(self, ctx2):
 def ttest(ui, repo, *args, **opts):
   """ internal consistency checks for the topic extension """
 
+  ui.status("Path: %s\n" % sys.path[0])
+  ui.status("Abs:  %s\n" % os.path.abspath(sys.path[0]))
+
+  ui.status("Checking ancestor algorithm...\n")
   log = repo.changelog
   for rev in log:
     parents = log.parentrevs(rev)
@@ -942,8 +946,9 @@ def ttest(ui, repo, *args, **opts):
     ctxa = calcChangectxAncestor(ctx1, ctx2)
     ctxo = origCalcChangectxAncestor(ctx1, ctx2)
     if ctxa.node() != ctxo.node():
-      print "diff: ancestor(%d,%d)=%d (was %d)" % (ctx1.rev(), ctx2.rev(), ctxa.rev(), ctxo.rev())
+      ui.status("  diff: ancestor(%d,%d)=%d (was %d)\n" % (ctx1.rev(), ctx2.rev(), ctxa.rev(), ctxo.rev()))
 
+  ui.status("Done.")
 
 ###############################################################################
 def tmenu(ui, repo, *args, **opts):
@@ -996,7 +1001,8 @@ def tmenu(ui, repo, *args, **opts):
       if repoTimeBefore != repoTimeAfter:
         ui.warn("  (refreshing changed repository)\n")
         sys.argv = [sys.argv[0], 'tmenu', resp]
-        dispatch.run()
+        dispatch.run() # should never return
+        resp = "q"     # ...but just in case it does return, don't do anything
 
     # Handle quit separately
     if resp.upper() == 'Q':
