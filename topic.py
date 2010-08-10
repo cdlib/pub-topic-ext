@@ -16,7 +16,7 @@ global origCalcChangectxAncestor
 global ancestorCache
 ancestorCache = {}
 
-topicVersion = "1.5.1"
+topicVersion = "1.5.2"
 
 #################################################################################
 def ruleError(ui, message):
@@ -964,7 +964,7 @@ def tsync(ui, repo, *args, **opts):
   # Then pull and update the topic extension
   topicDir = os.path.dirname(__file__)
   timeBefore = os.path.getmtime(os.path.join(topicDir, ".hg"))
-  if tryCommand(ui, "pull -R %s -u" % quoteBranch(topicDir), lambda:os.system('hg pull -R "%s" -u' % topicDir)):
+  if tryCommand(ui, "pull -R %s -u" % quoteBranch(topicDir), lambda:os.system('hg pull -R "%s" --quiet -u' % topicDir)):
     return 1
   timeAfter = os.path.getmtime(os.path.join(topicDir, ".hg"))
 
