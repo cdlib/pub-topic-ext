@@ -1038,7 +1038,8 @@ def uisetup(ui):
   origCalcChangectxAncestor = getattr(context.changectx, 'ancestor')
   assert origCalcChangectxAncestor is not None
   if os.path.exists("disable_new_merge"): # used for before vs after tests
-    print "(new merge disabled)"
+    sys.stderr.write("(new merge disabled)\n")
+    pass
   else:
     setattr(context.changectx, 'ancestor', calcChangectxAncestor)
 
