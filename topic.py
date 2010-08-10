@@ -854,7 +854,7 @@ def calcChangectxAncestor(self, ctx2):
   if cacheKey in ancestorCache:
     return ancestorCache[cacheKey]
 
-  print "  changectx.ancestor(%d, %d):" % (self.rev(), ctx2.rev())
+  #print "  changectx.ancestor(%d, %d):" % (self.rev(), ctx2.rev())
 
   # Handy stuff to have around
   repo = self._repo
@@ -911,15 +911,33 @@ def calcChangectxAncestor(self, ctx2):
 
   orig = origCalcChangectxAncestor(self, ctx2)
   if orig:
-    print "    ctxancestor(%d,%d)=%d (was %d)" % (self.rev(), ctx2.rev(), c1, orig.rev())
+    #print "    ctxancestor(%d,%d)=%d (was %d)" % (self.rev(), ctx2.rev(), c1, orig.rev())
     assert c1 >= orig.rev()
   else:
-    print "    ctxancestor(%d,%d)=%d (was None)" % (self.rev(), ctx2.rev(), c1)
+    #print "    ctxancestor(%d,%d)=%d (was None)" % (self.rev(), ctx2.rev(), c1)
+    pass
 
   # Cache for future use
   ret = context.changectx(repo, c1)
   ancestorCache[cacheKey] = ret
   return ret
+
+
+###############################################################################
+def ttest(ui, repo, *args, **opts):
+  """ internal consistency checks for the topic extension """
+
+  log = repo.changelog
+  for rev in log:
+    parents = log.parentrevs(rev)
+    if parents[1] < 0:
+      continue
+    ctx1 = repo[parents[0]]
+    ctx2 = repo[parents[1]]
+    ctxa = calcChangectxAncestor(ctx1, ctx2)
+    ctxo = origCalcChangectxAncestor(ctx1, ctx2)
+    if ctxa.node() != ctxo.node():
+      print "diff: ancestor(%d,%d)=%d (was %d)" % (ctx1.rev(), ctx2.rev(), ctxa.rev(), ctxo.rev())
 
 
 ###############################################################################
@@ -1019,7 +1037,9 @@ def uisetup(ui):
 
   origCalcChangectxAncestor = getattr(context.changectx, 'ancestor')
   assert origCalcChangectxAncestor is not None
-  if not os.path.exists("disable_new_merge"): # used for before vs after tests
+  if os.path.exists("disable_new_merge"): # used for before vs after tests
+    print "(new merge disabled)"
+  else:
     setattr(context.changectx, 'ancestor', calcChangectxAncestor)
 
 
@@ -1058,6 +1078,10 @@ cmdtable = {
                       "[branches]"),
 
     "tmenu":         (tmenu,
+                      [],
+                      ""),
+
+    "ttest":         (ttest,
                       [],
                       ""),
 
