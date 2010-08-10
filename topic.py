@@ -932,8 +932,8 @@ def calcChangectxAncestor(self, ctx2):
 def ttest(ui, repo, *args, **opts):
   """ internal consistency checks for the topic extension """
 
-  ui.status("Path: %s\n" % sys.path[0])
-  ui.status("Abs:  %s\n" % os.path.abspath(sys.path[0]))
+  ui.status("Path: %s\n" % __file__)
+  ui.status("Abs:  %s\n" % os.path.abspath(__file__))
 
   ui.status("Checking ancestor algorithm...\n")
   log = repo.changelog
