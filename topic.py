@@ -16,7 +16,7 @@ global origCalcChangectxAncestor
 global ancestorCache
 ancestorCache = {}
 
-topicVersion = "1.5.3"
+topicVersion = "1.5.4"
 
 #################################################################################
 def ruleError(ui, message):
@@ -439,7 +439,7 @@ def tbranch(ui, repo, *args, **opts):
 
   if not target in topicBranchNames(repo, closed=True) + ['dev', 'prod', 'stage']:
     maybes = topicBranchNames(repo) + ['dev', 'prod', 'stage'] # don't check closed branches for maybes
-    matches = [b for b in maybes if target in b]
+    matches = [b for b in maybes if target.lower() in b.lower()]
     if len(matches) != 1:
       ui.warn("Error: branch '%s' does not exist.\n" % target)
       return 1
