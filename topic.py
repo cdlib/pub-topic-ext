@@ -16,7 +16,13 @@ global origCalcChangectxAncestor
 global ancestorCache
 ancestorCache = {}
 
-topicVersion = "1.5.4"
+topicVersion = "1.5.5"
+
+# Branch names initiailized in reposetup
+devBranch = None
+stageBranch = None
+prodBranch = None
+
 
 #################################################################################
 def ruleError(ui, message):
@@ -31,7 +37,7 @@ def isTopicRepo(repo):
   """ Check if the given repo is likely a topic repo. """
 
   bm = repo.branchmap()
-  return 'dev' in bm and 'stage' in bm and 'prod' in bm
+  return devBranch in bm and stageBranch in bm and prodBranch in bm
 
 
 #################################################################################
@@ -105,7 +111,7 @@ def checkBranch(ui, repo, node):
     return ruleError(ui, "Committing to default branch not allowed. Try making a topic branch.")
 
   # Don't allow dev/stage/prod branches to be closed.
-  if ctx.extra().get('close') and thisBranch in ['dev', 'stage', 'prod']:
+  if ctx.extra().get('close') and thisBranch in [devBranch, stageBranch, prodBranch]:
     return ruleError(ui, "Not allowed to close the main dev/stage/prod branches.")
 
   # Prevent multiple heads on the same branch
@@ -113,11 +119,11 @@ def checkBranch(ui, repo, node):
     return ruleError(ui, "Not allowed to create multiple heads in the same branch. Did you forget to merge?")
 
   # New branches may only branch from prod.
-  if thisBranch != p1Branch and p1Branch != 'prod':
+  if thisBranch != p1Branch and p1Branch != prodBranch:
 
     # Previously we allowed branching from dev; no longer.
     if util.shortdate(ctx.date()) >= "2010-07-07":
-      return ruleError(ui, "Topics are only allowed to branch from prod directly.")
+      return ruleError(ui, "Topics are only allowed to branch from '%s' directly." % prodBranch)
 
   isMerge = parent1 and parent2
   if isMerge:
@@ -127,11 +133,11 @@ def checkBranch(ui, repo, node):
       return ruleError(ui, "Merging into default branch not allowed.")
 
     # Merges must come from topic branches
-    if p2Branch in ['default', 'dev', 'stage', 'prod']:
+    if p2Branch in ['default', devBranch, stageBranch, prodBranch]:
       return ruleError(ui, "Merge must come from a topic branch.")
 
     # Merge to stage must have gone to dev first; prod must have gone to stage.
-    reqPred = 'dev' if thisBranch == 'stage' else 'stage' if thisBranch == 'prod' else None
+    reqPred = devBranch if thisBranch == stageBranch else stageBranch if thisBranch == prodBranch else None
     if reqPred:
 
       # Determine the last rev of this feature that was merged to the required predecessor.
@@ -157,8 +163,9 @@ def checkBranch(ui, repo, node):
   else:
 
     # Non-merge. These plain commits are not allowed on dev/stage/prod.
-    if thisBranch in ('dev', 'stage', 'prod'):
-      return ruleError(ui, "Direct commits to dev/stage/prod not allowed. Try making a topic branch.")
+    if thisBranch in (devBranch, stageBranch, prodBranch):
+      return ruleError(ui, "Direct commits to %s/%s/%s not allowed. Try making a topic branch." % 
+                           (devBranch, stageBranch, prodBranch))
 
   return True # no problems.
 
@@ -345,7 +352,7 @@ def calcBranchState(repo, branch, ctx):
 
   # Now check for merges to dev, stage, and prod
   topicRevs = list(revsOnBranch(repo, branch))
-  for mainBr in ('dev', 'stage', 'prod'):
+  for mainBr in (devBranch, stageBranch, prodBranch):
     found = findMainMerge(repo, topicRevs, mainBr)
     if found:
       states[found] = mainBr
@@ -379,13 +386,13 @@ def topen(ui, repo, *args, **opts):
     return 1
 
   target = args[0]
-  if target in topicBranchNames(repo, closed=True) + ['dev', 'prod', 'stage']:
+  if target in topicBranchNames(repo, closed=True) + [devBranch, prodBranch, stageBranch]:
     ui.warn("Error: a branch with that name already exists; try choosing a different name.\n")
     return 1
 
-  if repo.dirstate.branch() != 'prod':
-    ui.status("Branching from prod...\n")
-    res = commands.update(ui, repo, node='prod', check=True)
+  if repo.dirstate.branch() != prodBranch:
+    ui.status("Branching from %s...\n" % prodBranch)
+    res = commands.update(ui, repo, node=prodBranch, check=True)
     if res: return res
 
   return commands.branch(ui, repo, target)
@@ -437,8 +444,8 @@ def tbranch(ui, repo, *args, **opts):
     ui.status("You're already on that branch.\n")
     return
 
-  if not target in topicBranchNames(repo, closed=True) + ['dev', 'prod', 'stage']:
-    maybes = topicBranchNames(repo) + ['dev', 'prod', 'stage'] # don't check closed branches for maybes
+  if not target in topicBranchNames(repo, closed=True) + [devBranch, prodBranch, stageBranch]:
+    maybes = topicBranchNames(repo) + [devBranch, prodBranch, stageBranch] # don't check closed branches for maybes
     matches = [b for b in maybes if target.lower() in b.lower()]
     if len(matches) != 1:
       ui.warn("Error: branch '%s' does not exist.\n" % target)
@@ -485,7 +492,7 @@ def topicBranches(repo, closed = False):
   for tag, node in repo.branchtags().items():
 
     # Skip dev/stage/prod
-    if tag in ('default', 'dev', 'stage', 'prod'):
+    if tag in ('default', devBranch, stageBranch, prodBranch):
       continue
 
     # Skip closed branches if requested
@@ -508,7 +515,7 @@ def topicBranchNames(repo, closed = False):
   ret = [tup[0] for tup in topicBranches(repo, closed)]
 
   rb = repo.dirstate.branch()
-  if rb not in ret and rb not in ('dev', 'stage', 'prod', 'default'):
+  if rb not in ret and rb not in (devBranch, stageBranch, prodBranch, 'default'):
     ret.insert(0, repo.dirstate.branch())
   return ret
 
@@ -539,7 +546,7 @@ def tbranches(ui, repo, *args, **kwargs):
     toPrint.append((branch, user, date, branchState, descrip))
 
   if repo.dirstate.branch() not in branches and \
-     repo.dirstate.branch() not in ('dev', 'stage', 'prod', '', 'default'):
+     repo.dirstate.branch() not in (devBranch, stageBranch, prodBranch, '', 'default'):
     toPrint.insert(0, (repo.dirstate.branch(), 'n/a', 'n/a', '*local', '<working directory>'))
 
   printColumns(ui, ('Branch', 'Who', 'When', 'Where', 'Description'), toPrint)
@@ -647,7 +654,7 @@ def onTopicBranch(ui, repo):
   """ Check if the repo is currently on a topic branch. """
 
   branch = repo.dirstate.branch()
-  if branch in ('dev', 'stage', 'prod', 'default'):
+  if branch in (devBranch, stageBranch, prodBranch, 'default'):
     ui.warn("Error: you are not currently on a topic branch. Use 'tbranch' to switch to one.\n")
     return False
   return True
@@ -695,15 +702,16 @@ def tpush(ui, repo, *args, **opts):
 
     resp = resp.upper()
     args = []
-    if 'D' in resp: args.append('dev')
-    if 'S' in resp: args.append('stage')
-    if 'P' in resp: args.append('prod')
+    if 'D' in resp: args.append(devBranch)
+    if 'S' in resp: args.append(stageBranch)
+    if 'P' in resp: args.append(prodBranch)
 
     opts = { 'nopull':False, 'nocommit':False, 'message':None }
 
   # Make sure a branch to push to was specified
   elif len(args) < 1:
-    ui.warn("Error: You must specify at least one branch (dev/stage/prod) to push to.\n")
+    ui.warn("Error: You must specify at least one branch (%s/%s/%s) to push to.\n" %
+            (devBranch, stageBranch, prodBranch))
     return 1
 
   # Figure out where it's currently pushed to
@@ -713,9 +721,9 @@ def tpush(ui, repo, *args, **opts):
   tmp = set(pushedTo)
   alreadyMerged = set()
   for arg in args:
-    need = {'dev':None, 'stage':'dev', 'prod':'stage'}.get(arg, 'bad')
+    need = {devBranch:None, stageBranch:devBranch, prodBranch:stageBranch}.get(arg, 'bad')
     if need == 'bad':
-      ui.warn("Error: you may only push to 'dev', 'stage', or 'prod'.\n")
+      ui.warn("Error: you may only push to '%s', '%s', or '%s'.\n" % (devBranch, stageBranch, prodBranch))
       return 1
     elif arg in tmp:
       alreadyMerged.add(arg) # don't merge again
@@ -804,7 +812,7 @@ def tclose(ui, repo, *args, **opts):
     branches = [repo.dirstate.branch()]
 
   for branch in branches:
-    if not repo.branchheads(branch) or branch in ('default', 'dev', 'stage', 'prod'):
+    if not repo.branchheads(branch) or branch in ('default', devBranch, stageBranch, prodBranch):
       ui.warn("Error: %s is not an open topic branch\n" % branch)
       return 1
 
@@ -838,7 +846,7 @@ def tclose(ui, repo, *args, **opts):
       return 1
 
   # Finally, update to dev to avoid confusingly re-opening the closed branch
-  if tryCommand(ui, "update prod", lambda:commands.update(ui, repo, node='prod')):
+  if tryCommand(ui, "update %s" % prodBranch, lambda:commands.update(ui, repo, node=prodBranch)):
     return 1
 
   ui.status("Done.\n")
@@ -851,7 +859,7 @@ def calcChangectxAncestor(self, ctx2):
       regularized merge structure. """
 
   # Only do this for topic repos, and only for merges to dev/stage/prod.
-  if not isTopicRepo(self._repo) or self.branch() not in ('dev', 'stage', 'prod'):
+  if not isTopicRepo(self._repo) or self.branch() not in (devBranch, stageBranch, prodBranch):
     return origCalcChangectxAncestor(self, ctx2)
 
   # If cached, save some time.
@@ -1064,6 +1072,19 @@ def tversion(ui, repo, *args, **opts):
   """ print out the version of the topic extension """
 
   ui.status("Topic extension version: %s\n" % topicVersion)
+
+
+#################################################################################
+def reposetup(ui, repo):
+  """ Set up branch names we need. These are typically 'dev', 'stage', and 'prod'
+      but they can be overridden in a config file.
+  """
+
+  global devBranch, stageBranch, prodBranch
+  devBranch  = ui.config('topic', 'dev-branch', default = 'dev')
+  stageBranch = ui.config('topic', 'stage-branch', default = 'stage')
+  prodBranch = ui.config('topic', 'prod-branch', default = 'prod')
+
 
 #################################################################################
 def uisetup(ui):
