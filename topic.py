@@ -700,7 +700,7 @@ def isClean(ui, repo):
 def quoteBranch(name):
   """ If the given name needs quoting for regular shell use, quote it now. """
 
-  if re.search("[^a-zA-Z0-9.-_]", name):
+  if re.search("[^-a-zA-Z0-9._]", name):
     return '"%s"' % name
   return name
 
