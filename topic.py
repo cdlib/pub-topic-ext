@@ -22,6 +22,8 @@ topicVersion = "1.5.5"
 devBranch = None
 stageBranch = None
 prodBranch = None
+ignoreBranches = []
+specialBranches = []
 
 
 #################################################################################
@@ -107,11 +109,11 @@ def checkBranch(ui, repo, node):
   p2Branch = parent2.branch() if parent2 else None
 
   # Don't allow anything to go into the default branch.
-  if thisBranch == 'default':
-    return ruleError(ui, "Committing to default branch not allowed. Try making a topic branch.")
+  if thisBranch in ignoreBranches:
+    return ruleError(ui, "Committing to branch '%s' not allowed. Try making a topic branch." % thisBranch)
 
   # Don't allow dev/stage/prod branches to be closed.
-  if ctx.extra().get('close') and thisBranch in [devBranch, stageBranch, prodBranch]:
+  if ctx.extra().get('close') and thisBranch in specialBranches:
     return ruleError(ui, "Not allowed to close the main dev/stage/prod branches.")
 
   # Prevent multiple heads on the same branch
@@ -129,11 +131,11 @@ def checkBranch(ui, repo, node):
   if isMerge:
 
     # Merges cannot go into default
-    if thisBranch == 'default':
+    if thisBranch in ignoreBranches:
       return ruleError(ui, "Merging into default branch not allowed.")
 
     # Merges must come from topic branches
-    if p2Branch in ['default', devBranch, stageBranch, prodBranch]:
+    if p2Branch in specialBranches:
       return ruleError(ui, "Merge must come from a topic branch.")
 
     # Merge to stage must have gone to dev first; prod must have gone to stage.
@@ -163,7 +165,7 @@ def checkBranch(ui, repo, node):
   else:
 
     # Non-merge. These plain commits are not allowed on dev/stage/prod.
-    if thisBranch in (devBranch, stageBranch, prodBranch):
+    if thisBranch in specialBranches:
       return ruleError(ui, "Direct commits to %s/%s/%s not allowed. Try making a topic branch." % 
                            (devBranch, stageBranch, prodBranch))
 
@@ -287,7 +289,7 @@ def validateCommit(ui, repo, node, *args, **kwargs):
 
 #################################################################################
 def revsOnBranch(repo, branch):
-  """ Yield all revisions of the given branch, in topological order. """
+  """ Yield all revision nodes of the given branch, in topological order. """
 
   visit = repo.branchheads(branch, closed = True)
   seen = set()
@@ -298,12 +300,10 @@ def revsOnBranch(repo, branch):
       continue
     seen.add(p)
 
-    if type(p) == str:
-      p = repo[p]
-    if p.branch() != branch:
+    if repo.changelog.read(p)[5].get("branch") != branch:
       continue
 
-    visit.extend(p.parents())
+    visit.extend(repo.changelog.parents(p))
     yield p
 
 
@@ -316,39 +316,36 @@ def findMainMerge(repo, topicRevs, mainBranch):
     return None
 
   # Determine where to stop the scan
-  firstTopicRev = int(topicRevs[-1])
+  firstTopicRev = repo.changelog.rev(topicRevs[-1])
 
   # Scan for merges from the topic branch to the given main branch
   topicSet = set(topicRevs)
   for mr in revsOnBranch(repo, mainBranch):
 
     # Stop if we reach a point in history before the start of the topic
-    if int(mr) < int(topicRevs[-1]):
+    if repo.changelog.rev(mr) < firstTopicRev:
       break
 
     # Skip non-merges
-    if len(mr.parents()) < 2:
+    parents = repo.changelog.parents(mr)
+    if parents[1] is nullrev:
       continue
 
     # Is this a marge from our topic branch? If so we're done.
-    if mr.parents()[1] in topicSet:
-      return mr.parents()[1]
-      break
+    if parents[1] in topicSet:
+      return parents[1]
 
   # Couldn't find anything.
   return None
 
 
 #################################################################################
-def calcBranchState(repo, branch, ctx):
+def calcBranchState(repo, branch, node):
   """ Figure out whether the given branch is local, or has been merged to
       dev/stage/prod. """
 
   # Detect if the branch has been closed
-  if 'close' in ctx.changeset()[5]:
-    states = {ctx: 'closed'}
-  else:
-    states = {ctx: 'local'}
+  states = {node: 'closed' if 'close' in repo.changelog.read(node)[5] else 'local'}
 
   # Now check for merges to dev, stage, and prod
   topicRevs = list(revsOnBranch(repo, branch))
@@ -360,9 +357,9 @@ def calcBranchState(repo, branch, ctx):
   # Make the final textual version
   outList = []
   for (p, state) in states.iteritems():
-    if p != ctx:
-      state += "(%d)" % int(p)
-    if p in [repo[p] for p in repo.dirstate.parents()]:
+    if p != node:
+      state += "(%d)" % repo.changelog.rev(p)
+    if p in repo.dirstate.parents():
       state = "*" + state
     outList.append(state)
 
@@ -435,7 +432,7 @@ def tbranch(ui, repo, *args, **opts):
   # If no branch specified, show the status of the current branch.
   if len(args) < 1:
     ui.status("Current branch: %s\n" % repo.dirstate.branch())
-    ui.status("        Status: %s\n" % calcBranchState(repo, repo.dirstate.branch(), repo[repo.dirstate.parents()[0]]))
+    ui.status("        Status: %s\n" % calcBranchState(repo, repo.dirstate.branch(), repo.dirstate.parents()[0]))
     return
 
   # Otherwise, switch to a different (existing) branch
@@ -487,12 +484,36 @@ def topicBranches(repo, closed = False):
   """ Get a list of the topic branches, ordered by descending date of last change. 
       Each list entry is a tuple (branchname, headCtx) """
 
+  # Helper function to produce the set of direct parent branches
+  def parentBranches(ctx):
+
+    # Deal with workingctx
+    node = ctx.node() if ctx.node() is not None else ctx.parents()[0].node()
+
+    # Init
+    visit = [node]
+    parentBranches = set()
+    while len(visit):
+      node = visit.pop()
+
+      # If we haven't reached a parent branch yet, keep going
+      br = repo.changelog.read(node)[5].get("branch")
+      if br == ctx.branch():
+        parents = repo.changelog.parents(node)
+        visit.append(parents[0])
+        if not parents[1] == nullrev:
+          visit.append(parents[1])
+      else:
+        parentBranches.add(br)
+
+    return parentBranches
+
   # Process each branch
   result = []
   for tag, node in repo.branchtags().items():
 
     # Skip dev/stage/prod
-    if tag in ('default', devBranch, stageBranch, prodBranch):
+    if tag in specialBranches:
       continue
 
     # Skip closed branches if requested
@@ -500,6 +521,10 @@ def topicBranches(repo, closed = False):
     if not closed:
       if not hn in repo.branchheads(tag, closed=False):
         continue
+
+    # Skip branches that don't originate from prod
+    if not prodBranch in parentBranches(repo[hn]):
+      continue
 
     # Determine all the field values we're going to print
     result.append((tag, repo[hn]))
@@ -515,7 +540,7 @@ def topicBranchNames(repo, closed = False):
   ret = [tup[0] for tup in topicBranches(repo, closed)]
 
   rb = repo.dirstate.branch()
-  if rb not in ret and rb not in (devBranch, stageBranch, prodBranch, 'default'):
+  if rb not in ret and rb not in specialBranches:
     ret.insert(0, repo.dirstate.branch())
   return ret
 
@@ -537,7 +562,7 @@ def tbranches(ui, repo, *args, **kwargs):
     branches.add(branch)
     user = util.shortuser(ctx.user())
     date = util.shortdate(ctx.date())
-    branchState = calcBranchState(repo, branch, ctx)
+    branchState = calcBranchState(repo, branch, ctx.node())
 
     descrip = ctx.description().splitlines()[0].strip()
     if len(descrip) > 60:
@@ -546,7 +571,7 @@ def tbranches(ui, repo, *args, **kwargs):
     toPrint.append((branch, user, date, branchState, descrip))
 
   if repo.dirstate.branch() not in branches and \
-     repo.dirstate.branch() not in (devBranch, stageBranch, prodBranch, '', 'default'):
+     repo.dirstate.branch() not in specialBranches + ['']:
     toPrint.insert(0, (repo.dirstate.branch(), 'n/a', 'n/a', '*local', '<working directory>'))
 
   printColumns(ui, ('Branch', 'Who', 'When', 'Where', 'Description'), toPrint)
@@ -654,7 +679,7 @@ def onTopicBranch(ui, repo):
   """ Check if the repo is currently on a topic branch. """
 
   branch = repo.dirstate.branch()
-  if branch in (devBranch, stageBranch, prodBranch, 'default'):
+  if branch in specialBranches:
     ui.warn("Error: you are not currently on a topic branch. Use 'tbranch' to switch to one.\n")
     return False
   return True
@@ -812,7 +837,7 @@ def tclose(ui, repo, *args, **opts):
     branches = [repo.dirstate.branch()]
 
   for branch in branches:
-    if not repo.branchheads(branch) or branch in ('default', devBranch, stageBranch, prodBranch):
+    if not repo.branchheads(branch) or branch in specialBranches:
       ui.warn("Error: %s is not an open topic branch\n" % branch)
       return 1
 
@@ -1080,10 +1105,12 @@ def reposetup(ui, repo):
       but they can be overridden in a config file.
   """
 
-  global devBranch, stageBranch, prodBranch
+  global devBranch, stageBranch, prodBranch, ignoreBranches, specialBranches
   devBranch  = ui.config('topic', 'dev-branch', default = 'dev')
   stageBranch = ui.config('topic', 'stage-branch', default = 'stage')
   prodBranch = ui.config('topic', 'prod-branch', default = 'prod')
+  ignoreBranches = re.split("[ ,]+", ui.config('topic', 'ignore-branches', default = 'default'))
+  specialBranches = [devBranch, stageBranch, prodBranch] + ignoreBranches
 
 
 #################################################################################
