@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "1.5.6"
+topicVersion = "1.5.7"
 
 
 #################################################################################
@@ -110,11 +110,18 @@ def checkBranch(ui, repo, node):
   if len(repo.branchmap()[thisBranch]) > 1:
     return ruleError(ui, "Not allowed to create multiple heads in the same branch. Did you forget to merge?")
 
-  # New branches may only branch from prod.
+  # New branches may only branch from prod (old-style check)
   if thisBranch != p1Branch and p1Branch != repo.topicProdBranch:
 
     # Previously we allowed branching from dev; no longer.
     if util.shortdate(ctx.date()) >= "2010-07-07":
+      return ruleError(ui, "Topics are only allowed to branch from '%s' directly." % repo.topicProdBranch)
+
+  # (new-style check)
+  if thisBranch not in (p1Branch, p2Branch) and (p1Branch, p2Branch) != (repo.topicProdBranch, None):
+
+    # Previously we allowed a crazy case of merging two named branches to a third name; no longer
+    if util.shortdate(ctx.date()) >= "2010-08-31":
       return ruleError(ui, "Topics are only allowed to branch from '%s' directly." % repo.topicProdBranch)
 
   isMerge = parent1 and parent2
@@ -623,7 +630,7 @@ def tlog(ui, repo, *pats, **opts):
 
 
 ###############################################################################
-def tryCommand(ui, descrip, commandFunc):
+def tryCommand(ui, descrip, commandFunc, showOutput = False):
   """ Run a command and capture its output. Print the output only if it fails. """
 
   ui.status("  hg %s\n" % descrip)
@@ -641,7 +648,7 @@ def tryCommand(ui, descrip, commandFunc):
         self.echoTo.write("    " + str)
       StringIO.write(self, str)
 
-  buffer = Grabber(sys.stdout if ui.verbose else None)
+  buffer = Grabber(sys.stdout if (ui.verbose or showOutput) else None)
   (oldStdout, oldStderr) = (sys.stdout, sys.stderr)
   (sys.stdout, sys.stderr) = (buffer, buffer)
 
@@ -655,7 +662,7 @@ def tryCommand(ui, descrip, commandFunc):
 
     # Restore in/out streams
     (sys.stdout, sys.stderr) = (oldStdout, oldStderr)
-    outFunc = ui.warn if res and not ui.verbose else lambda x: x
+    outFunc = ui.warn if (res and not ui.verbose and not showOutput) else lambda x: x
     outFunc("\n")
     for line in buffer.getvalue().split("\n"):
       outFunc("    " + line + "\n")
@@ -724,7 +731,7 @@ def tpush(ui, repo, *args, **opts):
     opts = { 'nopull':False, 'nocommit':False, 'message':None }
 
   # Make sure a branch to push to was specified
-  elif len(args) < 1:
+  if len(args) < 1:
     ui.warn("Error: You must specify at least one branch (%s/%s/%s) to push to.\n" %
             (repo.topicDevBranch, repo.topicStageBranch, repo.topicProdBranch))
     return 1
@@ -768,8 +775,8 @@ def tpush(ui, repo, *args, **opts):
         if tryCommand(ui, "update %s" % quoteBranch(mergeTo), lambda:hg.update(repo, mergeTo)):
           return 1
 
-        # Merge it.
-        if tryCommand(ui, "merge %s" % quoteBranch(mergeFrom), lambda:hg.merge(repo, mergeFrom)):
+        # Merge it. Don't hide the output as merge sometimes needs to ask the user questions.
+        if tryCommand(ui, "merge %s" % quoteBranch(mergeFrom), lambda:hg.merge(repo, mergeFrom), showOutput = True):
           ui.status("Merge failed! Getting back to clean state...\n")
           tryCommand(ui, "update -C %s" % quoteBranch(mergeFrom), lambda:hg.clean(repo, mergeFrom))
           return 1
