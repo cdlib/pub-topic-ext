@@ -121,7 +121,7 @@ def checkBranch(ui, repo, node):
   if thisBranch not in (p1Branch, p2Branch) and (p1Branch, p2Branch) != (repo.topicProdBranch, None):
 
     # Previously we allowed a crazy case of merging two named branches to a third name; no longer
-    if util.shortdate(ctx.date()) >= "2010-08-31":
+    if util.shortdate(ctx.date()) >= "2010-09-01":
       return ruleError(ui, "Topics are only allowed to branch from '%s' directly." % repo.topicProdBranch)
 
   isMerge = parent1 and parent2
