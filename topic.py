@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "1.5.7"
+topicVersion = "1.5.8"
 
 
 #################################################################################
@@ -835,22 +835,32 @@ def tclose(ui, repo, *args, **opts):
       return 1
     branches = [repo.dirstate.branch()]
 
+  if 'tmenu' in opts:
+    if ui.prompt("Branch '%s': close it?" % branches[0]).upper() != 'Y':
+      return 1
+    opts = { 'nopull':False }
+
+  pulled = False # only pull once
+
   for branch in branches:
+
+    # Pull new changes from the central repo to avoid multiple-heads problem
+    if not opts['nopull'] and not pulled:
+      if tryCommand(ui, "pull", lambda:commands.pull(ui, repo, **opts)):
+        return 1
+      pulled = True
+
+    # Can't close already closed branches, nor any of the special branches
     if not repo.branchheads(branch) or branch in repo.topicSpecialBranches:
       ui.warn("Error: %s is not an open topic branch\n" % branch)
       return 1
 
-  if 'tmenu' in opts:
-    if ui.prompt("Branch '%s': close it?" % branches[0]).upper() != 'Y':
-      return 1
-    opts = {}
-
-  for branch in branches:
-
-    if branch != repo.dirstate.branch():
+    # Now update to the head of the branch being closed
+    if repo.dirstate.parents()[0] not in repo.branchheads(branch):
       if tryCommand(ui, "update %s" % quoteBranch(branch), lambda:commands.update(ui, repo, node=branch)):
         return 1
 
+    # Make sure it can be cleanly closed.
     branchState = calcBranchState(repo, branch, repo.dirstate.parents()[0])
     if branchState.replace("*", "") not in ('local', repo.topicProdBranch):
       ui.warn("Error: branch has only been partly pushed. " +
@@ -1167,7 +1177,8 @@ cmdtable = {
                       "dev|stage|prod"),
 
     "tclose":        (tclose,
-                      [('m', 'message',   None, "use <text> as commit message instead of default 'Closing <branch>'")]
+                      [('m', 'message',   None, "use <text> as commit message instead of default 'Closing <branch>'"),
+                       ('P', 'nopull',    None, "don't pull current data from master")]
                       + commands.remoteopts,
                       "[branches]"),
 
