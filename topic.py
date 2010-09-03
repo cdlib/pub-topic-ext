@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "1.5.8"
+topicVersion = "1.5.9"
 
 
 #################################################################################
@@ -645,7 +645,8 @@ def tryCommand(ui, descrip, commandFunc, showOutput = False):
       self.echoTo = echoTo
     def write(self, str):
       if self.echoTo:
-        self.echoTo.write("    " + str)
+        if "(branch merge, don't forget to commit)" not in str:
+          self.echoTo.write("    " + str)
       StringIO.write(self, str)
 
   buffer = Grabber(sys.stdout if (ui.verbose or showOutput) else None)
