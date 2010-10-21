@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "1.5.9"
+topicVersion = "1.6.0"
 
 
 #################################################################################
@@ -384,12 +384,13 @@ def topen(ui, repo, *args, **opts):
     ui.warn("Error: a branch with that name already exists; try choosing a different name.\n")
     return 1
 
-  if repo.dirstate.branch() != repo.topicProdBranch:
-    ui.status("Branching from %s...\n" % repo.topicProdBranch)
-    res = commands.update(ui, repo, node=repo.topicProdBranch, check=True)
-    if res: return res
+  if repo.dirstate.parents()[0] not in repo.branchheads('prod') or \
+     repo.dirstate.branch() != repo.topicProdBranch:
+    if tryCommand(ui, "update %s" % quoteBranch(repo.topicProdBranch), \
+                  lambda:commands.update(ui, repo, node=repo.topicProdBranch, check=True)):
+      return 1
 
-  return commands.branch(ui, repo, target)
+  return tryCommand(ui, 'branch %s' % target, lambda:commands.branch(ui, repo, target))
 
 
 #################################################################################
@@ -1006,7 +1007,9 @@ def tsync(ui, repo, *args, **opts):
   mustBeTopicRepo(repo)
 
   # Pull and update the current repo
-  if tryCommand(ui, "pull -u", lambda:commands.pull(ui, repo, **opts)):
+  pullOpts = copy.deepcopy(opts)
+  pullOpts['update'] = True
+  if tryCommand(ui, "pull -u", lambda:commands.pull(ui, repo, **pullOpts)):
     return 1
 
   # Then pull and update the topic extension
