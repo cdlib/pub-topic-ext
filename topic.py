@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "1.6.0"
+topicVersion = "1.6.1"
 
 
 #################################################################################
@@ -131,9 +131,9 @@ def checkBranch(ui, repo, node):
     if thisBranch in repo.topicIgnoreBranches:
       return ruleError(ui, "Merging into default branch not allowed.")
 
-    # Merges must come from topic branches
-    if p2Branch in repo.topicSpecialBranches:
-      return ruleError(ui, "Merge must come from a topic branch.")
+    # Merges must come from topic branches or prod
+    if p2Branch in repo.topicSpecialBranches and p2Branch != repo.topicProdBranch:
+      return ruleError(ui, "Merge must come from a topic branch or prod.")
 
     # Merge to stage must have gone to dev first; prod must have gone to stage.
     reqPred = repo.topicDevBranch if thisBranch == repo.topicStageBranch else repo.topicStageBranch if thisBranch == repo.topicProdBranch else None
@@ -717,26 +717,32 @@ def tpush(ui, repo, *args, **opts):
 
   # If called from the menu, allow user to choose target branch
   if 'tmenu' in opts:
-    resp = ui.prompt("Which branch(es) [dsp]:", "")
+    resp = ui.prompt("Push to which branch(es) [dsp], or blank to just share:", "")
 
     for c in resp:
       if c.upper() not in ('D', 'S', 'P'):
-        ui.warn("Unknown push target '%s'" % resp)
+        ui.warn("Unknown push target '%s'\n" % resp)
         return 1
 
-    resp = resp.upper()
     args = []
+    resp = resp.upper()
     if 'D' in resp: args.append(repo.topicDevBranch)
     if 'S' in resp: args.append(repo.topicStageBranch)
     if 'P' in resp: args.append(repo.topicProdBranch)
 
     opts = { 'nopull':False, 'nocommit':False, 'message':None }
 
-  # Make sure a branch to push to was specified
+  # We'll use a special set of options for hg push commands
+  pushOpts = copy.deepcopy(opts)
+  pushOpts['force'] = True # we very often create new branches and it's okay!
+
+  # If no branch was specified, just share the current branch
   if len(args) < 1:
-    ui.warn("Error: You must specify at least one branch (%s/%s/%s) to push to.\n" %
-            (repo.topicDevBranch, repo.topicStageBranch, repo.topicProdBranch))
-    return 1
+    if tryCommand(ui, "push -f -b %s" % quoteBranch(mergeFrom),
+                  lambda:commands.push(ui, repo, branch=(mergeFrom,), **pushOpts)):
+      return 1
+    ui.status("Done.\n")
+    return 0
 
   # Figure out where it's currently pushed to
   pushedTo = [p.branch() for p in repo.parents()[0].children()]
@@ -799,8 +805,6 @@ def tpush(ui, repo, *args, **opts):
           return 1
 
     # Push to the central server
-    pushOpts = copy.deepcopy(opts)
-    pushOpts['force'] = True # we very often create new branches and it's okay!
     if tryCommand(ui, "push -f -b %s" % (" -b ".join([quoteBranch(b) for b in args])), 
                   lambda:commands.push(ui, repo, branch=args, **pushOpts)):
       return 1
