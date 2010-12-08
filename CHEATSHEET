@@ -1,0 +1,47 @@
+Simplified Topic System - Cheat Sheet
+=====================================
+
+Create new topic branch
+  $ hg pull
+  $ hg update prod
+  $ hg branch IIMMDD-description  # II=initials, MM=month, DD=day
+  $ hg commit -m "Starting branch"
+  
+List branches, switch branch
+  $ hg branches                   # "inactive" == in prod but still open
+  $ hg branch                     # shows current branch; or "hg summary"
+  $ hg update branchName          # switch branch. Yes, it's hg update.
+
+Push branch to dev (or stage)
+  $ hg push -b branchName dev     # add --new-branch if first time
+  ...then browse to <http://branchName.dev.escholarship.org>
+  ...similarly for stage
+
+Push branch to central (for sharing or backup)
+  $ hg push                       # add --new-branch if first time  
+
+Freshen branch with other peoples' prod changes
+  $ hg pull                       # if "no changes found", ur done
+  $ hg merge prod
+  ... "merging with ancestor has no effect" == no changes, ur done
+  ... if conflicts you can back out with "hg update --clean", or...
+  $ hg resolve -l                 # list all files with conflicts
+  ...fix fix fix...
+  $ hg resolve --mark --all       # short form is "-ma"
+  $ hg commit -m "Merging recent prod changes"
+  
+Push branch to production (freshen first!)
+  $ hg update prod                # now you're on prod branch
+  $ hg merge branchName           # should never conflict (ur fresh right?)
+  $ hg commit -m "Merge to prod"
+  $ hg push                       # can fail if ur no longer freshest
+  ...central will auto-update dev, stage, and production...
+  $ hg update branchName          # back on your branch now
+
+Close branch
+  $ hg commit --close-branch -m "Closing branch"
+  $ hg push                       # auto-updates dev, stage & production
+
+Abandon branch
+  ...If never pushed to prod, just close, nobody will know ];->
+  ...otherwise, make backout changeset, push...
