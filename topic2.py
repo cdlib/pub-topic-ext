@@ -126,7 +126,6 @@ def checkBranch(ui, repo, node):
 
 #################################################################################
 def validateChangegroup(ui, repo, hooktype, **opts):
-
   """ pretxnchangegroup hook: perform content-specific checks before accepting 
       an incoming changegroup. """
 
@@ -156,7 +155,6 @@ def validateChangegroup(ui, repo, hooktype, **opts):
 
 #################################################################################
 def repushChangegroup(ui, repo, hooktype, **opts):
-
   """ changegroup hook: if pushing to any branch, and configured to do so, 
       push the stuff further on to the appropriate server. """
 
@@ -169,20 +167,30 @@ def repushChangegroup(ui, repo, hooktype, **opts):
   for ctx in [repo[n] for n in range(int(repo[opts['node']]), len(repo))]:
     branchesChanged.add(ctx.branch())
 
-  # Now check if any "repush-X" config entries are present, where X is
+  # Now check if any "repush-XYZ" config entries are present, where XYZ is
   # a matching branch name.
   #
-  for branch in sorted(branchesChanged):
-    repushTarget = ui.config('topic', 'repush-'+branch)
-    if repushTarget:
-      ui.status("Re-push %s branch: " % branch)
-      commands.push(ui, repo, dest=repushTarget, force = True)
-      ui.status("Done with re-push to %s\n" % branch)
+  targets = set()
+  for branch in branchesChanged:
+    str = ui.config('topic', 'repush-'+branch)
+    if str:
+      ui.status("Re-push to '%s' triggered by %s branch" % (repushTargets, branch))
+      targets.update(set(re.split("\s*,\s*", repushTargets)))
 
+  # Also, if there's a "repush-always" entry, take it.
+  str = ui.config('topic', 'repush-always')
+  if len(branchesChanged) > 0 and str:
+    ui.status("Re-push to '%s' triggered by repush-always" % str)
+    targets.update(set(re.split("\s*,\s*", str)))
+
+  # Push to each targeted repository
+  for target in sorted(targets):
+    ui.status("Re-pushing to target %s:" % target)
+    commands.push(ui, repo, dest=target, force = True)
+    ui.status("Done re-pushing to target %s\n" % target)
 
 #################################################################################
 def autoUpdate(ui, repo, hooktype, **opts):
-
   """ changegroup hook: if a push arrives with changes to the current branch,
       update it automatically. """
 
@@ -206,7 +214,6 @@ def autoUpdate(ui, repo, hooktype, **opts):
 
 #################################################################################
 def validateCommit(ui, repo, node, *args, **kwargs):
-
   """ pretxncommit hook: perform content-specific checks before accepting 
       a commit """
 
