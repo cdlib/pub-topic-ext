@@ -174,18 +174,18 @@ def repushChangegroup(ui, repo, hooktype, **opts):
   for branch in branchesChanged:
     str = ui.config('topic', 'repush-'+branch)
     if str:
-      ui.status("Re-push to '%s' triggered by %s branch" % (repushTargets, branch))
+      ui.status("Re-push to '%s' triggered by %s branch\n" % (repushTargets, branch))
       targets.update(set(re.split("\s*,\s*", repushTargets)))
 
   # Also, if there's a "repush-always" entry, take it.
   str = ui.config('topic', 'repush-always')
   if len(branchesChanged) > 0 and str:
-    ui.status("Re-push to '%s' triggered by repush-always" % str)
+    ui.status("Re-push to '%s' triggered by repush-always\n" % str)
     targets.update(set(re.split("\s*,\s*", str)))
 
   # Push to each targeted repository
   for target in sorted(targets):
-    ui.status("Re-pushing to target %s:" % target)
+    ui.status("Re-pushing to target %s:\n" % target)
     commands.push(ui, repo, dest=target, force = True)
     ui.status("Done re-pushing to target %s\n" % target)
 
