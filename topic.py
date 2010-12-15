@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "1.6.1"
+topicVersion = "2.0"
 
 
 #################################################################################
@@ -29,7 +29,7 @@ def isTopicRepo(repo):
   """ Check if the given repo is likely a topic repo. """
 
   bm = repo.branchmap()
-  return repo.topicDevBranch in bm and repo.topicStageBranch in bm and repo.topicProdBranch in bm
+  return repo.topicProdBranch in bm
 
 
 #################################################################################
@@ -38,23 +38,6 @@ def mustBeTopicRepo(repo):
 
   if not isTopicRepo(repo):
     raise util.Abort("This doesn't appear to be a topic repository.")
-
-
-#################################################################################
-def checkTabs(ui, repo, node):
-
-  fp = StringIO()
-  patch.export(repo, [node], fp=fp)
-  result = fp.getvalue()
-  fp.close()
-  for line in result.split("\n"):
-    if re.match("^\+\s*\t", line):
-      return ruleError(ui, "Coding standard does not allow tab characters to be introduced.\n"
-              "Please set your editor to expand tabs to spaces, then search for\n"
-              "all tabs and replace them.\n"
-              "Offending line:\n" + line)
-
-  return True
 
 
 #################################################################################
@@ -102,27 +85,23 @@ def checkBranch(ui, repo, node):
   if thisBranch in repo.topicIgnoreBranches:
     return ruleError(ui, "Committing to branch '%s' not allowed. Try making a topic branch." % thisBranch)
 
-  # Don't allow dev/stage/prod branches to be closed.
+  # Don't allow prod branch to be closed.
   if ctx.extra().get('close') and thisBranch in repo.topicSpecialBranches:
-    return ruleError(ui, "Not allowed to close the main dev/stage/prod branches.")
+    return ruleError(ui, "Not allowed to close the main production branch.")
 
   # Prevent multiple heads on the same branch
   if len(repo.branchmap()[thisBranch]) > 1:
     return ruleError(ui, "Not allowed to create multiple heads in the same branch. Did you forget to merge?")
 
-  # New branches may only branch from prod (old-style check)
   if thisBranch != p1Branch and p1Branch != repo.topicProdBranch:
 
     # Previously we allowed branching from dev; no longer.
     if util.shortdate(ctx.date()) >= "2010-07-07":
       return ruleError(ui, "Topics are only allowed to branch from '%s' directly." % repo.topicProdBranch)
 
-  # (new-style check)
+  # New branches may only branch from prod
   if thisBranch not in (p1Branch, p2Branch) and (p1Branch, p2Branch) != (repo.topicProdBranch, None):
-
-    # Previously we allowed a crazy case of merging two named branches to a third name; no longer
-    if util.shortdate(ctx.date()) >= "2010-09-01":
-      return ruleError(ui, "Topics are only allowed to branch from '%s' directly." % repo.topicProdBranch)
+    return ruleError(ui, "Topics are only allowed to branch from '%s' directly." % repo.topicProdBranch)
 
   isMerge = parent1 and parent2
   if isMerge:
@@ -135,43 +114,18 @@ def checkBranch(ui, repo, node):
     if p2Branch in repo.topicSpecialBranches and p2Branch != repo.topicProdBranch:
       return ruleError(ui, "Merge must come from a topic branch or prod.")
 
-    # Merge to stage must have gone to dev first; prod must have gone to stage.
-    reqPred = repo.topicDevBranch if thisBranch == repo.topicStageBranch else repo.topicStageBranch if thisBranch == repo.topicProdBranch else None
-    if reqPred:
-
-      # Determine the last rev of this feature that was merged to the required predecessor.
-      # For instance, if we're trying to merge to stage, find the last rev that was merged
-      # to dev.
-      #
-      branchMap = repo.branchmap()
-      assert reqPred in branchMap
-      reqHead = branchMap[reqPred][0]
-      ancestor = repo[reqHead].ancestor(parent2)
-
-      #print "ctx:", str(ctx), int(ctx)
-      #print "parent1:", str(parent1), int(parent2)
-      #print "reqHead:", str(repo[reqHead]), int(repo[reqHead])
-      #print "ancestor:", str(ancestor), int(ancestor)
-
-      # If there have been changes to the feature since the last merge to the predecessor,
-      # that means somebody forgot to do the missing merge.
-      #
-      if ancestor != parent2:
-        return ruleError(ui, "You must merge changes to %s before %s." % (reqPred, thisBranch))
-
   else:
 
-    # Non-merge. These plain commits are not allowed on dev/stage/prod.
+    # Non-merge. These plain commits are not allowed on prod.
     if thisBranch in repo.topicSpecialBranches:
-      return ruleError(ui, "Direct commits to %s/%s/%s not allowed. Try making a topic branch." % 
-                           (repo.topicDevBranch, repo.topicStageBranch, repo.topicProdBranch))
+      return ruleError(ui, "Direct commits to '%s' not allowed. Try making a topic branch." % 
+                           repo.topicProdBranch)
 
   return True # no problems.
 
 
 #################################################################################
 def validateChangegroup(ui, repo, hooktype, **opts):
-
   """ pretxnchangegroup hook: perform content-specific checks before accepting 
       an incoming changegroup. """
 
@@ -188,7 +142,6 @@ def validateChangegroup(ui, repo, hooktype, **opts):
 
   # Check each incoming commit to make sure it meets our rules
   for ctx in [repo[n] for n in range(int(repo[opts['node']]), len(repo))]:
-    #print int(ctx), ctx.branch(), ctx.description()
     parents = ctx.parents()
     if len(parents) == 1:
       parents.append(None)
@@ -202,9 +155,8 @@ def validateChangegroup(ui, repo, hooktype, **opts):
 
 #################################################################################
 def repushChangegroup(ui, repo, hooktype, **opts):
-
-  """ changegroup hook: if pushing to dev/stage/prod branch, push the stuff
-      further on to the appropriate server. """
+  """ changegroup hook: if pushing to any branch, and configured to do so, 
+      push the stuff further on to the appropriate server. """
 
   # Silently skip this for non-topic repos
   if not isTopicRepo(repo):
@@ -215,20 +167,30 @@ def repushChangegroup(ui, repo, hooktype, **opts):
   for ctx in [repo[n] for n in range(int(repo[opts['node']]), len(repo))]:
     branchesChanged.add(ctx.branch())
 
-  # Now check if any "repush-X" config entries are present, where X is
+  # Now check if any "repush-XYZ" config entries are present, where XYZ is
   # a matching branch name.
   #
-  for branch in sorted(branchesChanged):
-    repushTarget = ui.config('topic', 'repush-'+branch)
-    if repushTarget:
-      ui.status("Re-push %s branch: " % branch)
-      commands.push(ui, repo, dest=repushTarget, force = True)
-      ui.status("Done with re-push to %s\n" % branch)
+  targets = set()
+  for branch in branchesChanged:
+    str = ui.config('topic', 'repush-'+branch)
+    if str:
+      ui.status("Re-push to '%s' triggered by %s branch\n" % (repushTargets, branch))
+      targets.update(set(re.split("\s*,\s*", repushTargets)))
 
+  # Also, if there's a "repush-always" entry, take it.
+  str = ui.config('topic', 'repush-always')
+  if len(branchesChanged) > 0 and str:
+    ui.status("Re-push to '%s' triggered by repush-always\n" % str)
+    targets.update(set(re.split("\s*,\s*", str)))
+
+  # Push to each targeted repository
+  for target in sorted(targets):
+    ui.status("Re-pushing to target %s:\n" % target)
+    commands.push(ui, repo, dest=target, force = True)
+    ui.status("Done re-pushing to target %s\n" % target)
 
 #################################################################################
 def autoUpdate(ui, repo, hooktype, **opts):
-
   """ changegroup hook: if a push arrives with changes to the current branch,
       update it automatically. """
 
@@ -252,7 +214,6 @@ def autoUpdate(ui, repo, hooktype, **opts):
 
 #################################################################################
 def validateCommit(ui, repo, node, *args, **kwargs):
-
   """ pretxncommit hook: perform content-specific checks before accepting 
       a commit """
 
@@ -266,11 +227,6 @@ def validateCommit(ui, repo, node, *args, **kwargs):
   ctx = repo[node]
   if "NO_TOPIC_VALIDATE" in ctx.description():
     return False # no problems
-
-  # Check for any tabs being added in any file. They're not allowd.
-  # MH: This is too stringent for now, need to approve this change with everybody.
-  #if not checkTabs(ui, repo, node):
-  #  return True # abort
 
   # XML must be well-formed
   if not checkXML(ui, repo, node):
@@ -303,7 +259,6 @@ def revsOnBranch(repo, branch):
     visit.extend(repo.changelog.parents(p))
     yield p
 
-
 #################################################################################
 def findMainMerge(repo, topicRevs, mainBranch):
   """ Figure out whether a local branch has been merged to a main branch. """
@@ -335,7 +290,6 @@ def findMainMerge(repo, topicRevs, mainBranch):
   # Couldn't find anything.
   return None
 
-
 #################################################################################
 def calcBranchState(repo, branch, node):
   """ Figure out whether the given branch is local, or has been merged to
@@ -344,12 +298,12 @@ def calcBranchState(repo, branch, node):
   # Detect if the branch has been closed
   states = {node: 'closed' if 'close' in repo.changelog.read(node)[5] else 'local'}
 
-  # Now check for merges to dev, stage, and prod
-  topicRevs = list(revsOnBranch(repo, branch))
-  for mainBr in (repo.topicDevBranch, repo.topicStageBranch, repo.topicProdBranch):
-    found = findMainMerge(repo, topicRevs, mainBr)
+  # Now check for merges to prod
+  if repo.dirstate.branch() != repo.topicProdBranch:
+    topicRevs = list(revsOnBranch(repo, branch))
+    found = findMainMerge(repo, topicRevs, repo.topicProdBranch)
     if found:
-      states[found] = mainBr
+      states[found] = repo.topicProdBranch
 
   # Make the final textual version
   outList = []
@@ -380,7 +334,7 @@ def topen(ui, repo, *args, **opts):
     return 1
 
   target = args[0]
-  if target in topicBranchNames(repo, closed=True) + [repo.topicDevBranch, repo.topicProdBranch, repo.topicStageBranch]:
+  if target in topicBranchNames(repo, closed=True) + [repo.topicProdBranch]:
     ui.warn("Error: a branch with that name already exists; try choosing a different name.\n")
     return 1
 
@@ -390,9 +344,12 @@ def topen(ui, repo, *args, **opts):
                   lambda:commands.update(ui, repo, node=repo.topicProdBranch, check=True)):
       return 1
 
-  return tryCommand(ui, 'branch %s' % target, lambda:commands.branch(ui, repo, target))
+  if tryCommand(ui, 'branch %s' % target, lambda:commands.branch(ui, repo, target)):
+    return 1
 
-
+  text = "Opening branch %s" % quoteBranch(target)
+  return tryCommand(ui, "commit", lambda:repo.commit(text) is None)
+                    
 #################################################################################
 def tbranch(ui, repo, *args, **opts):
 
@@ -406,7 +363,6 @@ def tbranch(ui, repo, *args, **opts):
     if not branches:
       ui.warn("There are no branches to switch to.\n")
       return 1
-    branches = sorted(branches)
 
     ui.status("Branches you can switch to:\n")
     for i in range(len(branches)):
@@ -439,8 +395,8 @@ def tbranch(ui, repo, *args, **opts):
     ui.status("You're already on that branch.\n")
     return
 
-  if not target in topicBranchNames(repo, closed=True) + [repo.topicDevBranch, repo.topicProdBranch, repo.topicStageBranch]:
-    maybes = topicBranchNames(repo) + [repo.topicDevBranch, repo.topicProdBranch, repo.topicStageBranch] # don't check closed branches for maybes
+  if not target in topicBranchNames(repo, closed=True) + [repo.topicProdBranch]:
+    maybes = topicBranchNames(repo) + [repo.topicProdBranch] # don't check closed branches for maybes
     matches = [b for b in maybes if target.lower() in b.lower()]
     if len(matches) != 1:
       ui.warn("Error: branch '%s' does not exist.\n" % target)
@@ -510,7 +466,7 @@ def topicBranches(repo, closed = False):
   result = []
   for tag, node in repo.branchtags().items():
 
-    # Skip dev/stage/prod
+    # Skip prod
     if tag in repo.topicSpecialBranches:
       continue
 
@@ -570,7 +526,7 @@ def tbranches(ui, repo, *args, **kwargs):
 
   if repo.dirstate.branch() not in branches and \
      repo.dirstate.branch() not in repo.topicSpecialBranches + ['']:
-    toPrint.insert(0, (repo.dirstate.branch(), 'n/a', 'n/a', '*local', '<working directory>'))
+    toPrint.insert(0, (repo.dirstate.branch(), 'n/a', 'n/a', '*local', '<not yet committed>'))
 
   printColumns(ui, ('Branch', 'Who', 'When', 'Where', 'Description'), toPrint)
 
@@ -626,6 +582,9 @@ def tlog(ui, repo, *pats, **opts):
         descrip = ctx.description().splitlines()[0].strip()
         if len(descrip) > 60: descrip = descrip[0:57] + "..."
         toPrint.append((int(ctx), user, date, kind, descrip))
+
+    # To get same order as hg log
+    toPrint.reverse()
 
     printColumns(ui, ('Rev num', 'Who', 'When', 'Where', 'Description'), toPrint, indent=4)
 
@@ -703,21 +662,94 @@ def quoteBranch(name):
     return '"%s"' % name
   return name
 
+###############################################################################
+def doMerge(ui, repo, branch):
+  """ Merge from the given branch into the working directory. """
+
+  # Try the merge. Don't hide the output as merge sometimes needs to ask the user questions.
+  if tryCommand(ui, "merge %s" % quoteBranch(branch), lambda:hg.merge(repo, branch), showOutput = True):
+    res = ui.prompt("Merge failed! Do you want to fix it manually? (if not, will return to clean state):", default="y")
+    if res.lower() != "y" and res.lower() != "yes":
+      ui.status("Getting back to clean state...\n")
+      tryCommand(ui, "update --clean", lambda:hg.clean(repo, repo.dirstate.branch()))
+    else:
+      ui.status("Ok, leaving directory in partly merged state. To finish:\n")
+      ui.status("  $ hg resolve --list        # list conflicting files\n")
+      ui.status("  ...fix fix fix...\n")
+      ui.status("  $ hg resolve --mark --all  # shortcut: resolve -am\n")
+      ui.status("  $ hg commit\n")
+      ui.status("Or, to abandon the merge:\n")
+      ui.status("  $ hg update --clean\n")
+    return 1
+
+  return 0
 
 ###############################################################################
-def tpush(ui, repo, *args, **opts):
-  """ merge current branch to dev, stage, or production and push it there """
+def tfreshen(ui, repo, *args, **opts):
+  """ Pull recent changes from prod and merge them into the current branch. """
 
   mustBeTopicRepo(repo)
 
   # Sanity checks
   if not(onTopicBranch(ui, repo) and isClean(ui, repo)):
     return 1
-  mergeFrom = repo.dirstate.branch()
+  topicBranch = repo.dirstate.branch()
+
+  commitStop = False # note if we get to that step
+
+  # Pull new changes from the central repo
+  if not opts.get('nopull', False):
+    if tryCommand(ui, "pull", lambda:commands.pull(ui, repo, **opts)):
+      return 1
+
+  # Are there any changes to merge?
+  workDir = repo[None].parents()[0]
+  prodTip = repo[repo.branchheads(repo.topicProdBranch)[0]]
+  ancestor = prodTip.ancestor(workDir)
+  #print("prodTip:" + str(prodTip) + ", workDir:" + str(workDir) + ", ancestor:" + str(ancestor))
+  if prodTip.node() == ancestor.node() or topicBranch in [p.branch() for p in prodTip.parents()]:
+    ui.status("  (%s is still fresh)\n" % topicBranch)
+    return 0
+  else:
+    ui.status("  (will freshen %s from %s)\n" % (topicBranch, repo.topicProdBranch))
+
+  # Merge it.
+  if doMerge(ui, repo, repo.topicProdBranch):
+    return 1
+
+  # Stop if requested.
+  if opts.get('nocommit', False):
+    ui.status("\nStopping before commit as requested.\n")
+    commitStop = True
+    return 0
+
+  # Unlike a normal hg commit, if no text is specified we supply a reasonable default.
+  text = opts.get('message')
+  if text is None:
+    text = "Merge recent changes from %s" % repo.topicProdBranch
+
+  # Commit the merge.
+  if tryCommand(ui, "commit", lambda:repo.commit(text) is None):
+    return 1
+
+  if not opts.get('terse', False):
+    ui.status("Done.\n")
+
+
+###############################################################################
+def tpush(ui, repo, *args, **opts):
+  """ Push current branch to dev, stage, or production (and merge if prod). """
+
+  mustBeTopicRepo(repo)
+
+  # Sanity checks
+  if not(onTopicBranch(ui, repo) and isClean(ui, repo)):
+    return 1
+  topicBranch = repo.dirstate.branch()
 
   # If called from the menu, allow user to choose target branch
   if 'tmenu' in opts:
-    resp = ui.prompt("Push to which branch(es) [dsp], or blank to just share:", "")
+    resp = ui.prompt("Push to which machine(es) [dsp], or blank to just share:", "")
 
     for c in resp:
       if c.upper() not in ('D', 'S', 'P'):
@@ -726,8 +758,8 @@ def tpush(ui, repo, *args, **opts):
 
     args = []
     resp = resp.upper()
-    if 'D' in resp: args.append(repo.topicDevBranch)
-    if 'S' in resp: args.append(repo.topicStageBranch)
+    if 'D' in resp: args.append("dev")
+    if 'S' in resp: args.append("stage")
     if 'P' in resp: args.append(repo.topicProdBranch)
 
     opts = { 'nopull':False, 'nocommit':False, 'message':None }
@@ -738,91 +770,71 @@ def tpush(ui, repo, *args, **opts):
 
   # If no branch was specified, just share the current branch
   if len(args) < 1:
-    if tryCommand(ui, "push -f -b %s" % quoteBranch(mergeFrom),
-                  lambda:commands.push(ui, repo, branch=(mergeFrom,), **pushOpts)):
+    if tryCommand(ui, "push -f -b %s" % quoteBranch(topicBranch),
+                  lambda:commands.push(ui, repo, branch=(topicBranch,), **pushOpts)):
       return 1
     ui.status("Done.\n")
     return 0
 
-  # Figure out where it's currently pushed to
-  pushedTo = [p.branch() for p in repo.parents()[0].children()]
-
-  # Make sure the arguments are in order (dev -> stage -> prod)
-  tmp = set(pushedTo)
-  alreadyMerged = set()
-  for arg in args:
-    need = {repo.topicDevBranch:None, repo.topicStageBranch:repo.topicDevBranch, repo.topicProdBranch:repo.topicStageBranch}.get(arg, 'bad')
-    if need == 'bad':
-      ui.warn("Error: you may only push to '%s', '%s', or '%s'.\n" % (repo.topicDevBranch, repo.topicStageBranch, repo.topicProdBranch))
-      return 1
-    elif arg in tmp:
-      alreadyMerged.add(arg) # don't merge again
-    elif need and need not in tmp:
-      ui.warn("Error: you must push to %s before %s\n" % (need, arg))
-      return 1
-    tmp.add(arg)
-
-  pulled = False # only pull once
   commitStop = False # note if we get to that step
 
   # Okay, let's go for it.
-  try:
+  for mergeTo in args:
 
-    # Pull new changes from the central repo
-    if not opts['nopull'] and not pulled and set(args) - alreadyMerged:
-      if tryCommand(ui, "pull", lambda:commands.pull(ui, repo, **opts)):
-        return 1
-      pulled = True
-
-    for mergeTo in args:
-
-      # Merge if necessary
-      if not mergeTo in alreadyMerged:
-
-        # Update to the branch we're going to merge into
-        if tryCommand(ui, "update %s" % quoteBranch(mergeTo), lambda:hg.update(repo, mergeTo)):
-          return 1
-
-        # Merge it. Don't hide the output as merge sometimes needs to ask the user questions.
-        if tryCommand(ui, "merge %s" % quoteBranch(mergeFrom), lambda:hg.merge(repo, mergeFrom), showOutput = True):
-          ui.status("Merge failed! Getting back to clean state...\n")
-          tryCommand(ui, "update -C %s" % quoteBranch(mergeFrom), lambda:hg.clean(repo, mergeFrom))
-          return 1
-
-        # Stop if requested.
-        if opts['nocommit']:
-          ui.status("\nStopping before commit as requested.\n")
-          commitStop = True
-          return 0
-
-        # Unlike a normal hg commit, if no text is specified we supply a reasonable default.
-        text = opts.get('message')
-        if text is None:
-          text = "Merge %s to %s" % (mergeFrom, mergeTo)
-
-        # Commit the merge.
-        if tryCommand(ui, "commit", lambda:repo.commit(text) is None):
-          return 1
-
-    # Push to the central server
-    if tryCommand(ui, "push -f -b %s" % (" -b ".join([quoteBranch(b) for b in args])), 
-                  lambda:commands.push(ui, repo, branch=args, **pushOpts)):
+    # Cannot merge to default, or to a topic branch
+    if mergeTo in repo.topicIgnoreBranches and mergeTo not in ('dev', 'stage'):
+      ui.warn("Cannot merge to '%s' branch.\n" % mergeTo)
       return 1
 
-    # And return to the original topic branch
-    if repo.dirstate.branch() != mergeFrom:
-      if tryCommand(ui, "update %s" % quoteBranch(mergeFrom), lambda:hg.update(repo, mergeFrom)):
+    # Merge if necessary (only to prod branch)
+    alreadyMerged = [p.branch() for p in repo.parents()[0].children()]
+    if mergeTo == repo.topicProdBranch and not mergeTo in alreadyMerged:
+
+      # Freshen with recent changes from prod
+      freshenOpts = copy.deepcopy(opts)
+      freshenOpts['terse'] = True # avoid printing "Done." at end
+      if tfreshen(ui, repo, *args, **freshenOpts):
         return 1
 
-    ui.status("Done.\n")
+      # Update to the prod
+      if tryCommand(ui, "update %s" % quoteBranch(mergeTo), lambda:hg.update(repo, mergeTo)):
+        return 1
 
-  # When all done, return to the original topic branch (even if something went wrong)
-  finally:
-    if repo.dirstate.branch() != mergeFrom and not commitStop:
-      ui.pushbuffer()
-      hg.update(repo, mergeFrom)
-      ui.popbuffer()
+      # Merge from the topic branch
+      if doMerge(ui, repo, topicBranch):
+        return 1
 
+      # Stop if requested.
+      if opts['nocommit']:
+        ui.status("\nStopping before commit as requested.\n")
+        commitStop = True
+        return 0
+
+      # Unlike a normal hg commit, if no text is specified we supply a reasonable default.
+      text = opts.get('message')
+      if text is None:
+        text = "Merge %s to %s" % (topicBranch, mergeTo)
+
+      # Commit the merge.
+      if tryCommand(ui, "commit", lambda:repo.commit(text) is None):
+        return 1
+
+    # Push to the correct server
+    if mergeTo == repo.topicProdBranch:
+      if tryCommand(ui, "push -f -b %s" % repo.topicProdBranch,
+                    lambda:commands.push(ui, repo, branch=(repo.topicProdBranch,), **pushOpts)):
+        return 1
+    else:
+      if tryCommand(ui, "push -f -b %s %s" % (topicBranch, mergeTo),
+                    lambda:commands.push(ui, repo, branch=(topicBranch,), dest=mergeTo, **pushOpts)):
+        return 1
+
+  # And return to the original topic branch
+  if repo.dirstate.branch() != topicBranch:
+    if tryCommand(ui, "update %s" % quoteBranch(topicBranch), lambda:hg.update(repo, topicBranch)):
+      return 1
+
+  ui.status("Done.\n")
 
 ###############################################################################
 def tclose(ui, repo, *args, **opts):
@@ -866,15 +878,6 @@ def tclose(ui, repo, *args, **opts):
       if tryCommand(ui, "update %s" % quoteBranch(branch), lambda:commands.update(ui, repo, node=branch)):
         return 1
 
-    # Make sure it can be cleanly closed.
-    branchState = calcBranchState(repo, branch, repo.dirstate.parents()[0])
-    if branchState.replace("*", "") not in ('local', repo.topicProdBranch):
-      ui.warn("Error: branch has only been partly pushed. " +
-              "Closing it would leave permanent diffferences between dev, stage and prod. " +
-              "If you really need to get rid of the changes, they need to be reversed, " +
-              "committed, and pushed all the way before closing.\n")
-      return 1
-
     # Unlike a normal hg commit, if no text is specified we supply a reasonable default.
     branch = repo.dirstate.branch()
     text = opts.get('message')
@@ -898,111 +901,6 @@ def tclose(ui, repo, *args, **opts):
     return 1
 
   ui.status("Done.\n")
-
-
-
-###############################################################################
-def calcChangectxAncestor(self, ctx2):
-  """ Special context ancestor calculation is needed for our unusual but very
-      regularized merge structure. """
-
-  repo = self._repo
-
-  # Only do this for topic repos, and only for merges to dev/stage/prod.
-  if not isTopicRepo(repo) or self.branch() not in (repo.topicDevBranch, repo.topicStageBranch, repo.topicProdBranch):
-    return origCalcChangectxAncestor(self, ctx2)
-
-  # If cached, save some time.
-  cacheKey = (self.node(), ctx2.node())
-  if cacheKey in repo.topicAncestorCache:
-    return repo.topicAncestorCache[cacheKey]
-
-  #print "  changectx.ancestor(%d, %d):" % (self.rev(), ctx2.rev())
-
-  # Handy stuff to have around
-  changelog = repo.changelog
-
-  # Helper function to produce ancestors. Their rev nums are
-  # produced, highest first.
-  #
-  def ancestorsOf(ctx):
-
-    # Deal with workingctx
-    node = ctx.node()
-    if node is None:
-      node = c2.parents()[0].node()
-
-    # Init
-    visit = [-changelog.rev(node)]
-    min = None
-    while len(visit):
-      rev = -heapq.heappop(visit)
-      node = changelog.node(rev)
-
-      # Avoid duplicates
-      if min is not None and rev >= min:
-        continue
-      if min is None or rev < min:
-        min = rev
-
-      # Got one
-      yield rev
-
-      # Add the parent(s) to our list of revisions to visit
-      parents = changelog.parents(node)
-      p1 = changelog.rev(parents[0])
-      heapq.heappush(visit, -p1)
-
-      if not parents[1] == nullrev:
-        p2 = changelog.rev(parents[1])
-        heapq.heappush(visit, -p2)
-
-  # Find the most recent common ancestor by doing a merge-sort
-  # of the two lists until we find the highest matching rev.
-  #
-  ancestors = set()
-  s1, s2 = ancestorsOf(self), ancestorsOf(ctx2)
-  c1, c2 = s1.next(), s2.next()
-  while True:
-    if c1 < c2:
-      c1, s1, c2, s2 = c2, s2, c1, s1
-    if c1 in ancestors:
-      break
-    ancestors.add(c1)
-    c1 = s1.next()
-
-  orig = origCalcChangectxAncestor(self, ctx2)
-  if orig:
-    #print "    ctxancestor(%d,%d)=%d (was %d)" % (self.rev(), ctx2.rev(), c1, orig.rev())
-    assert c1 >= orig.rev()
-  else:
-    #print "    ctxancestor(%d,%d)=%d (was None)" % (self.rev(), ctx2.rev(), c1)
-    pass
-
-  # Cache for future use
-  ret = context.changectx(repo, c1)
-  repo.topicAncestorCache[cacheKey] = ret
-  return ret
-
-
-###############################################################################
-def debugtopic(ui, repo, *args, **opts):
-  """ internal consistency checks for the topic extension """
-
-  ui.status("Checking ancestor algorithm...\n")
-  log = repo.changelog
-  for rev in log:
-    parents = log.parentrevs(rev)
-    if parents[1] < 0:
-      continue
-    ctx1 = repo[parents[0]]
-    ctx2 = repo[parents[1]]
-    ctxa = calcChangectxAncestor(ctx1, ctx2)
-    ctxo = origCalcChangectxAncestor(ctx1, ctx2)
-    if ctxa.node() != ctxo.node():
-      ui.status("  diff: ancestor(%d,%d)=%d (was %d)\n" % (ctx1.rev(), ctx2.rev(), ctxa.rev(), ctxo.rev()))
-
-  ui.status("Done.")
 
 ###############################################################################
 def tsync(ui, repo, *args, **opts):
@@ -1041,6 +939,7 @@ def tmenu(ui, repo, *args, **opts):
 
   menuEntries = [('o', topen,     "open new branch"),
                  ('l', tlog,      "log (history)"),
+                 ('f', tfreshen,  "freshen recent changes"),
                  ('p', tpush,     "push to dev/stage/prod"),
                  ('c', tclose,    "close branch"),
                  ('s', tbranches, "show open branches"),
@@ -1132,27 +1031,9 @@ def reposetup(ui, repo):
   """
 
   repo.topicAncestorCache = {}
-  repo.topicDevBranch = ui.config('topic', 'dev-branch', default = 'dev')
-  repo.topicStageBranch = ui.config('topic', 'stage-branch', default = 'stage')
   repo.topicProdBranch = ui.config('topic', 'prod-branch', default = 'prod')
   repo.topicIgnoreBranches = re.split("[ ,]+", ui.config('topic', 'ignore-branches', default = 'default'))
-  repo.topicSpecialBranches = [repo.topicDevBranch, repo.topicStageBranch, repo.topicProdBranch] + repo.topicIgnoreBranches
-
-
-#################################################################################
-def uisetup(ui):
-  """ Install extra special handlers for the topic extension. """
-
-  global origCalcFileAncestor, origCalcChangectxAncestor
-
-  orig = getattr(context.changectx, 'ancestor')
-  assert orig is not None
-  if os.path.exists("disable_new_merge"): # used for before vs after tests
-    sys.stderr.write("(new merge disabled)\n")
-    pass
-  elif orig != calcChangectxAncestor:
-    origCalcChangectxAncestor = orig
-    setattr(context.changectx, 'ancestor', calcChangectxAncestor)
+  repo.topicSpecialBranches = [repo.topicProdBranch] + repo.topicIgnoreBranches
 
 
 #################################################################################
@@ -1177,6 +1058,12 @@ cmdtable = {
                        + commands.templateopts,
                       "[branches]"),
 
+    "tfreshen|tf":   (tfreshen,
+                      [('P', 'nopull',    None, "don't pull current data from master"),
+                       ('C', 'nocommit',  None, "merge only, don't commit")] 
+                       + commands.remoteopts,
+                       ""),
+
     "tpush|tp":      (tpush,
                       [('m', 'message',   None, "use <text> as commit message instead of default 'Merge to <branch>'"),
                        ('P', 'nopull',    None, "don't pull current data from master"),
@@ -1195,10 +1082,6 @@ cmdtable = {
                       ""),
 
     "tsync":         (tsync,
-                      [],
-                      ""),
-
-    "debugtopic":    (debugtopic,
                       [],
                       ""),
 
