@@ -1,6 +1,21 @@
 Simplified Topic System - Cheat Sheet
 =====================================
 
+Setup
+
+  In your tree, just modify .hg/hgrc:
+
+    [paths]
+    default = ssh://eschol@escholarship.org/hgroot/xtf-erep
+    dev = ssh://eschol@dev.escholarship.org/erep/xtf
+    stage = ssh://eschol@stage.escholarship.org/erep/xtf
+
+    [extensions]                  # optional extension for txxx shortcuts:
+    topic = /path/to/your/hgext/topic/topic.py
+
+    [hooks]                       # optional checking of commit rules:
+    pretxncommit.topic_validate = python:topic.validateCommit   # optional
+
 Create new topic branch           [shortcut: 'hg topen branchName']
 
   $ hg pull
