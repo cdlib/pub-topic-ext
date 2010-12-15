@@ -1,31 +1,38 @@
 Simplified Topic System - Cheat Sheet
 =====================================
 
-Create new topic branch
+Create new topic branch           [shortcut: 'hg topen branchName']
+
   $ hg pull
   $ hg update prod
   $ hg branch IIMMDD-description  # II=initials, MM=month, DD=day
   ... not permanent until your first commit...
   
-List branches, switch branch
+List branches, switch branch      [shortcuts: 'hg tbranches', 'hg tbranch']
+
   $ hg branches                   # "inactive" == in prod but still open
   $ hg branch                     # shows current branch; or "hg summary"
   $ hg update branchName          # switch branch, note cmd is "update"
 
-Push branch to dev (or stage)
+Push branch to dev (or stage)     [shortcut: 'hg tpush devOrStage']
+
   $ hg push -b branchName dev     # add --new-branch if first time
   ...then browse to <http://branchName.dev.escholarship.org>
   ...similarly for stage
 
 Push branch to central (for sharing or backup)
+
   $ hg push                       # add --new-branch if first time  
 
 Freshen old branch with other peoples' prod changes (young branch can skip)
+                                  [shortcut: 'hg tfreshen']
+
   $ hg pull                       # if "no changes found": ur done
   $ hg merge prod                 # if "merge w/ ancest. has no effect": ur done
   $ hg commit -m "Merging recent prod changes"
   
-Push branch to production
+Push branch to production         [shortcut: 'hg tpush prod']
+
   $ hg update prod                # now you're on prod branch
   $ hg pull -u                    # skip if you just freshened
   $ hg merge branchName
@@ -35,6 +42,7 @@ Push branch to production
   $ hg update branchName          # back on your branch now
 
 Dealing with merge conflict
+
   ... "merging with ancestor has no effect" == no changes, ur done
   ... if conflicts you can back out with "hg update --clean", or...
   $ hg resolve -l                 # list all files with conflicts
@@ -42,10 +50,13 @@ Dealing with merge conflict
   $ hg resolve --mark --all       # short form is "-ma"
   $ hg commit
   
-Close branch
+Close branch                      [shortcut: 'hg tclose']
+
   $ hg commit --close-branch -m "Closing branch"
   $ hg push                       # auto-updates dev, stage & production
 
 Abandon branch
+
   ...If never pushed to prod, just close, nobody will know ];->
   ...otherwise, make backout changeset, push...
+
