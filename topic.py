@@ -13,8 +13,9 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.0"
+topicVersion = "2.01"
 
+topicState = {}
 
 #################################################################################
 def ruleError(ui, message):
@@ -298,8 +299,15 @@ def calcBranchState(repo, branch, node):
   # Detect if the branch has been closed
   states = {node: 'closed' if 'close' in repo.changelog.read(node)[5] else 'local'}
 
-  # Now check for merges to prod
-  if repo.dirstate.branch() != repo.topicProdBranch:
+  # Now check for pushes to dev and stage. These are record in a special file
+  # because they're not merges and thus not part of the normal repo history.
+  #
+  readTopicState(repo)
+  for (target, hexnode) in topicState.get(branch, {}).iteritems():
+    states[repo[hexnode].node()] = target
+
+  # Also look for pushes to prod; these are actual merges.
+  if branch != repo.topicProdBranch:
     topicRevs = list(revsOnBranch(repo, branch))
     found = findMainMerge(repo, topicRevs, repo.topicProdBranch)
     if found:
@@ -735,6 +743,23 @@ def tfreshen(ui, repo, *args, **opts):
   if not opts.get('terse', False):
     ui.status("Done.\n")
 
+###############################################################################
+def writeTopicState(repo):
+  """ Write the current state of the topic branches. """
+
+  filePath = os.path.join(repo.path, 'topicstate')
+  with open(filePath, "w") as f:
+    f.write(repr(topicState))
+
+###############################################################################
+def readTopicState(repo):
+  """ Read in the stored state of the topic branches. """
+  
+  filePath = os.path.join(repo.path, 'topicstate')
+  if os.path.exists(filePath):
+    with open(filePath, "r") as f:
+      global topicState
+      topicState = eval(f.read(), {}, {})
 
 ###############################################################################
 def tpush(ui, repo, *args, **opts):
@@ -828,6 +853,13 @@ def tpush(ui, repo, *args, **opts):
       if tryCommand(ui, "push -f -b %s %s" % (topicBranch, mergeTo),
                     lambda:commands.push(ui, repo, branch=(topicBranch,), dest=mergeTo, **pushOpts)):
         return 1
+
+    # Record the push so we can display the right branch status later
+    readTopicState(repo)
+    if not topicBranch in topicState:
+      topicState[topicBranch] = {}
+    topicState[topicBranch][mergeTo] = repo[repo.dirstate.parents()[0]].hex()
+    writeTopicState(repo)
 
   # And return to the original topic branch
   if repo.dirstate.branch() != topicBranch:
@@ -1025,6 +1057,30 @@ def tversion(ui, repo, *args, **opts):
 
 
 #################################################################################
+def checkPush(orig, ui, repo, *args, **kwargs):
+  """ If pushing from a topic branch to dev or stage, record the push in the 
+      topicstate file so that tbranches will show the right status. This is
+      needed because these pushes don't have merges and therefore are not
+      part of the normal repository record. """
+
+  status = orig(ui, repo, *args, **kwargs)
+
+  target = 'dev' if 'dev' in args \
+           else 'stage' if 'stage' in args \
+           else None
+  if target and isTopicRepo(repo) and status == 0:
+    readTopicState(repo)
+    if 'branch' in kwargs and len(kwargs['branch']) > 0:
+      topicBranch = kwargs['branch'][0]
+    else:
+      topicBranch = repo.dirstate.branch()
+    if not topicBranch in topicState:
+      topicState[topicBranch] = {}
+    topicState[topicBranch][target] = repo[repo.dirstate.parents()[0]].hex()
+    writeTopicState(repo)
+  return status
+
+#################################################################################
 def reposetup(ui, repo):
   """ Set up branch names we need. These are typically 'dev', 'stage', and 'prod'
       but they can be overridden in a config file.
@@ -1034,6 +1090,13 @@ def reposetup(ui, repo):
   repo.topicProdBranch = ui.config('topic', 'prod-branch', default = 'prod')
   repo.topicIgnoreBranches = re.split("[ ,]+", ui.config('topic', 'ignore-branches', default = 'default'))
   repo.topicSpecialBranches = [repo.topicProdBranch] + repo.topicIgnoreBranches
+
+
+#################################################################################
+def uisetup(ui):
+  """ Hook into the standard push command, to record topic branch pushes """
+
+  extensions.wrapcommand(commands.table, 'push', checkPush)
 
 
 #################################################################################
