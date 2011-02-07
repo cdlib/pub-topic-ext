@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.01"
+topicVersion = "2.02"
 
 topicState = {}
 
@@ -52,7 +52,7 @@ def checkXML(ui, repo, node):
     data = ctx[filename].data()
     if util.binary(data):
       continue
-    if data.startswith("<?xml "):
+    if data.startswith("<?xml ") and not re.search("\.dtd", filename):
       try:
         # Get rid of DTD declaration, since we don't care if it exists or not.
         data = re.sub("<!DOCTYPE [^>]*>", "", data)
