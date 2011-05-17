@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.02"
+topicVersion = "2.03"
 
 topicState = {}
 
@@ -331,6 +331,7 @@ def topen(ui, repo, *args, **opts):
 
   mustBeTopicRepo(repo)
 
+  # Check the arguments
   if 'tmenu' in opts:
     resp = ui.prompt("Name for new branch:", None)
     if not resp:
@@ -341,17 +342,25 @@ def topen(ui, repo, *args, **opts):
     ui.warn("Error: You must specify a name for the new branch.\n")
     return 1
 
+  # Pull new changes from the central repo
+  if not opts.get('nopull', False):
+    if tryCommand(ui, "pull", lambda:commands.pull(ui, repo, **opts)):
+      return 1
+
+  # Validate the name
   target = args[0]
   if target in topicBranchNames(repo, closed=True) + [repo.topicProdBranch]:
     ui.warn("Error: a branch with that name already exists; try choosing a different name.\n")
     return 1
 
+  # Make sure we're at the top of the prod branch
   if repo.dirstate.parents()[0] not in repo.branchheads('prod') or \
      repo.dirstate.branch() != repo.topicProdBranch:
     if tryCommand(ui, "update %s" % quoteBranch(repo.topicProdBranch), \
                   lambda:commands.update(ui, repo, node=repo.topicProdBranch, check=True)):
       return 1
 
+  # Create the new branch and commit it.
   if tryCommand(ui, 'branch %s' % target, lambda:commands.branch(ui, repo, target)):
     return 1
 
@@ -1104,7 +1113,8 @@ def uisetup(ui):
 #
 cmdtable = {
     "topen|tnew":    (topen,
-                      [('C', 'clean', None, 'discard uncommitted changes (no backup)')],
+                      [('C', 'clean', None, 'discard uncommitted changes (no backup)'),
+                       ('P', 'nopull',    None, "don't pull current data from master")],
                       "newbranchname"),
 
     "tbranch|tb":    (tbranch,
