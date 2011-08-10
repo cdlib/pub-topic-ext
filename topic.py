@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.03"
+topicVersion = "2.04"
 
 topicState = {}
 
@@ -38,7 +38,8 @@ def mustBeTopicRepo(repo):
   """ Abort if the given repo isn't a topic repo. """
 
   if not isTopicRepo(repo):
-    raise util.Abort("This doesn't appear to be a topic repository.")
+    raise util.Abort("This doesn't appear to be a topic repository.\n" +
+                     "If you think it should be, add a 'prod' branch.\n")
 
 
 #################################################################################
@@ -84,7 +85,8 @@ def checkBranch(ui, repo, node):
 
   # Don't allow anything to go into the default branch.
   if thisBranch in repo.topicIgnoreBranches:
-    return ruleError(ui, "Committing to branch '%s' not allowed. Try making a topic branch." % thisBranch)
+    return ruleError(ui, "Committing to branch '%s' not allowed. Try making a topic branch. " +
+      "You may be able to put your uncommitted work into a branch this way: 'hg branch <yourNewName>'" % thisBranch)
 
   # Don't allow prod branch to be closed.
   if ctx.extra().get('close') and thisBranch in repo.topicSpecialBranches:
@@ -1066,6 +1068,52 @@ def tversion(ui, repo, *args, **opts):
 
 
 #################################################################################
+def tsetup(ui, repo, *args, **kwargs):
+  """ Used to set up the topic extension in a pre-configured directory.
+      We look for a prod branch in the current directory, and try to find a 
+      .topic_hgrc file there.
+  """
+
+  mustBeTopicRepo(repo)
+
+  ui.status("Topic setup:\n")
+  
+  # Make sure we're at the top of the prod branch
+  if repo.dirstate.parents()[0] not in repo.branchheads('prod') or \
+     repo.dirstate.branch() != repo.topicProdBranch:
+    if tryCommand(ui, "update %s" % quoteBranch(repo.topicProdBranch), \
+                  lambda:commands.update(ui, repo, node=repo.topicProdBranch, check=True)):
+      return 1
+
+  # See if there's a .topic_hgrc_adds file.
+  addsFile = os.path.join(repo.path, "..", ".topic_hgrc_adds")
+  if not os.path.exists(addsFile):
+    raise util.Abort("There is no .topic_hgrc_adds file in your repository. Without that,\n" +
+                     "the Topic extension cannot guess how to configure itself.")
+  with open(addsFile, "r") as f:
+    toAdd = f.read()
+
+  # Stick in the extension
+  toAdd += "\n[extensions]\ntopic = %s\n" % __file__
+
+  # Offer to add things to the .hgrc file
+  ui.status("The following will be added to the .hg/hgrc file for this repo:\n\n" + toAdd)
+  res = ui.prompt("\nOkay to proceed?", default="y")
+  if res.lower() != "y" and res.lower() != "yes":
+    raise util.Abort("Ok.")
+
+  # Let's do it.
+  hgrcFile = os.path.join(repo.path, "hgrc")
+  with open(hgrcFile, "r") as f:
+    existing = f.read()
+
+  with open(hgrcFile, "w") as f:
+    f.write(existing + "\n" + toAdd)
+
+  ui.status("Done.\n")
+
+
+#################################################################################
 def checkPush(orig, ui, repo, *args, **kwargs):
   """ If pushing from a topic branch to dev or stage, record the push in the 
       topicstate file so that tbranches will show the right status. This is
@@ -1159,6 +1207,10 @@ cmdtable = {
                       ""),
 
     "tversion":      (tversion,
+                      [],
+                      ""),
+
+    "tsetup":        (tsetup,
                       [],
                       ""),
 
