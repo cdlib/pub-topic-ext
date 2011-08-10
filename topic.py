@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.05"
+topicVersion = "2.06"
 
 topicState = {}
 
@@ -85,8 +85,7 @@ def checkBranch(ui, repo, node):
 
   # Don't allow anything to go into the default branch.
   if thisBranch in repo.topicIgnoreBranches:
-    return ruleError(ui, "Committing to branch '%s' not allowed. Try making a topic branch. " +
-      "You may be able to put your uncommitted work into a branch this way: 'hg branch <yourNewName>'" % thisBranch)
+    return ruleError(ui, "Committing to branch '%s' not allowed. Try making a topic branch." % thisBranch)
 
   # Don't allow prod branch to be closed.
   if ctx.extra().get('close') and thisBranch in repo.topicSpecialBranches:
@@ -121,8 +120,8 @@ def checkBranch(ui, repo, node):
 
     # Non-merge. These plain commits are not allowed on prod.
     if thisBranch in repo.topicSpecialBranches:
-      return ruleError(ui, "Direct commits to '%s' not allowed. Try making a topic branch." % 
-                           repo.topicProdBranch)
+      return ruleError(ui, ("Direct commits to '%s' not allowed. Try making a topic branch. " +
+        "You may be able to put your uncommitted work into a branch this way: 'hg branch <yourNewName>'") % thisBranch)
 
   return True # no problems.
 
