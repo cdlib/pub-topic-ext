@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.04"
+topicVersion = "2.05"
 
 topicState = {}
 
@@ -1094,7 +1094,8 @@ def tsetup(ui, repo, *args, **kwargs):
     toAdd = f.read()
 
   # Stick in the extension
-  toAdd += "\n[extensions]\ntopic = %s\n" % __file__
+  topicDir = os.path.dirname(__file__)
+  toAdd += "\n[extensions]\ntopic = %s\n" % os.path.join(topicDir, "topic.py")
 
   # Offer to add things to the .hgrc file
   ui.status("The following will be added to the .hg/hgrc file for this repo:\n\n" + toAdd)
