@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.08"
+topicVersion = "2.09"
 
 topicState = {}
 
@@ -196,18 +196,19 @@ def repushChangegroup(ui, repo, hooktype, **opts):
 
   # Push to each targeted repository
   repoDir = os.path.dirname(repo.path)
+  hgCmd = os.path.abspath(sys.argv[0])
   for target in sorted(targets):
     if target in asyncTargets:
       ui.status("Re-pushing asynchronously to target %s:\n" % target)
       if tryCommand(ui, '-R "%s" push -f %s &' % (repoDir, quoteBranch(target)), \
-                    lambda:os.system('hg -R "%s" push -f "%s" < /dev/null > /dev/null 2> /dev/null &' % \
-                                     (repoDir, target))):
+                    lambda:os.system('%s -R "%s" push -f "%s" < /dev/null > /dev/null 2> /dev/null &' % \
+                                     (hgCmd, repoDir, target))):
         return 1
     else:
       ui.status("Re-pushing to target %s:\n" % target)
       if tryCommand(ui, '-R "%s" push -f %s' % (repoDir, quoteBranch(target)), \
-                    lambda:os.system('hg -R "%s" push -f "%s"' % \
-                                     (repoDir, target))):
+                    lambda:os.system('%s -R "%s" push -f "%s"' % \
+                                     (hgCmd, repoDir, target))):
         return 1
       ui.status("Done re-pushing to target %s\n" % target)
 
