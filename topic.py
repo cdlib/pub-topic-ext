@@ -648,11 +648,14 @@ def tryCommand(ui, descrip, commandFunc, showOutput = False, repo = None):
       StringIO.write(self, str)
 
   buffer = Grabber(sys.stdout if (ui.verbose or showOutput) else None)
-  (oldStdout, oldStderr, oldFout) = (sys.stdout, sys.stderr, ui.fout)
-  (sys.stdout, sys.stderr, ui.fout) = (buffer, buffer, buffer)
-  if repo and hasattr(repo, 'baseui'): # new for Mercurial 2.8+ (approx)
-    oldBaseFout = repo.baseui.fout
-    repo.baseui.fout = buffer
+  (oldStdout, oldStderr) = (sys.stdout, sys.stderr)
+  (sys.stdout, sys.stderr) = (buffer, buffer)
+  if hasattr(ui, 'fout'): # new for Mercurial 2.8+ (approx)
+    oldFout = ui.fout
+    ui.fout = buffer
+    if repo and hasattr(repo, 'baseui'):
+      oldBaseFout = repo.baseui.fout
+      repo.baseui.fout = buffer
 
   # Now run the command
   res = 1
@@ -663,9 +666,11 @@ def tryCommand(ui, descrip, commandFunc, showOutput = False, repo = None):
   finally:
 
     # Restore in/out streams
-    (sys.stdout, sys.stderr, ui.fout) = (oldStdout, oldStderr, oldFout)
-    if repo and hasattr(repo, 'baseui'):
-      repo.baseui.fout = oldBaseFout
+    (sys.stdout, sys.stderr) = (oldStdout, oldStderr)
+    if hasattr(ui, 'fout'): # new for Mercurial 2.8+ (approx)
+      ui.fout = oldFout
+      if repo and hasattr(repo, 'baseui'):
+        repo.baseui.fout = oldBaseFout
     outFunc = ui.warn if (res and not ui.verbose and not showOutput) else lambda x: x
     outFunc("\n")
     for line in buffer.getvalue().split("\n"):
