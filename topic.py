@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.06"
+topicVersion = "2.07"
 
 topicState = {}
 
@@ -185,11 +185,30 @@ def repushChangegroup(ui, repo, hooktype, **opts):
     ui.status("Re-push to '%s' triggered by repush-always\n" % str)
     targets.update(set(re.split("\s*,\s*", str)))
 
+  # Optionally, some targets can be repushed asynchronously (meaning we won't wait
+  # for them to finish).
+  #
+  str = ui.config('topic', 'repush-async')
+  if str:
+    asyncTargets = set(re.split("\s*,\s*", str))
+  else:
+    asyncTargets = set()
+
   # Push to each targeted repository
   for target in sorted(targets):
-    ui.status("Re-pushing to target %s:\n" % target)
-    commands.push(ui, repo, dest=target, force = True)
-    ui.status("Done re-pushing to target %s\n" % target)
+    if target in asyncTargets:
+      ui.status("Re-pushing asynchronously to target %s:\n" % target)
+      repoDir = os.path.dirname(repo.path)
+      if tryCommand(ui, '-R "%s" push -f %s &' % (repoDir, quoteBranch(target)), \
+                    lambda:os.system('hg -R "%s" push -f "%s" < /dev/null > /dev/null 2> /dev/null &' % \
+                                     (repoDir, target))):
+        return 1
+    else:
+      ui.status("Re-pushing to target %s:\n" % target)
+      if tryCommand(ui, "push -f %s" % quoteBranch(target), \
+                    lambda:commands.push(ui, repo, dest=target, force = True)):
+        return 1
+      ui.status("Done re-pushing to target %s\n" % target)
 
 #################################################################################
 def autoUpdate(ui, repo, hooktype, **opts):
@@ -608,7 +627,7 @@ def tlog(ui, repo, *pats, **opts):
 
 
 ###############################################################################
-def tryCommand(ui, descrip, commandFunc, showOutput = False):
+def tryCommand(ui, descrip, commandFunc, showOutput = False, repo = None):
   """ Run a command and capture its output. Print the output only if it fails. """
 
   ui.status("  hg %s\n" % descrip)
@@ -628,8 +647,11 @@ def tryCommand(ui, descrip, commandFunc, showOutput = False):
       StringIO.write(self, str)
 
   buffer = Grabber(sys.stdout if (ui.verbose or showOutput) else None)
-  (oldStdout, oldStderr) = (sys.stdout, sys.stderr)
-  (sys.stdout, sys.stderr) = (buffer, buffer)
+  (oldStdout, oldStderr, oldFout) = (sys.stdout, sys.stderr, ui.fout)
+  (sys.stdout, sys.stderr, ui.fout) = (buffer, buffer, buffer)
+  if repo and hasattr(repo, 'baseui'): # new for Mercurial 2.8+ (approx)
+    oldBaseFout = repo.baseui.fout
+    repo.baseui.fout = buffer
 
   # Now run the command
   res = 1
@@ -640,7 +662,9 @@ def tryCommand(ui, descrip, commandFunc, showOutput = False):
   finally:
 
     # Restore in/out streams
-    (sys.stdout, sys.stderr) = (oldStdout, oldStderr)
+    (sys.stdout, sys.stderr, ui.fout) = (oldStdout, oldStderr, oldFout)
+    if repo and hasattr(repo, 'baseui'):
+      repo.baseui.fout = oldBaseFout
     outFunc = ui.warn if (res and not ui.verbose and not showOutput) else lambda x: x
     outFunc("\n")
     for line in buffer.getvalue().split("\n"):
@@ -806,7 +830,8 @@ def tpush(ui, repo, *args, **opts):
   # If no branch was specified, just share the current branch
   if len(args) < 1:
     if tryCommand(ui, "push -f -b %s" % quoteBranch(topicBranch),
-                  lambda:commands.push(ui, repo, branch=(topicBranch,), **pushOpts)):
+                  lambda:commands.push(ui, repo, branch=(topicBranch,), **pushOpts),
+                  repo=repo):
       return 1
     ui.status("Done.\n")
     return 0
@@ -857,11 +882,13 @@ def tpush(ui, repo, *args, **opts):
     # Push to the correct server
     if mergeTo == repo.topicProdBranch:
       if tryCommand(ui, "push -f -b %s" % repo.topicProdBranch,
-                    lambda:commands.push(ui, repo, branch=(repo.topicProdBranch,), **pushOpts)):
+                    lambda:commands.push(ui, repo, branch=(repo.topicProdBranch,), **pushOpts),
+                    repo=repo):
         return 1
     else:
       if tryCommand(ui, "push -f -b %s %s" % (topicBranch, mergeTo),
-                    lambda:commands.push(ui, repo, branch=(topicBranch,), dest=mergeTo, **pushOpts)):
+                    lambda:commands.push(ui, repo, branch=(topicBranch,), dest=mergeTo, **pushOpts),
+                    repo=repo):
         return 1
 
     # Record the push so we can display the right branch status later
@@ -935,7 +962,7 @@ def tclose(ui, repo, *args, **opts):
     if 'message' in pushOpts:
       del pushOpts['message']
     pushOpts['force'] = True
-    if tryCommand(ui, "push -f -b %s" % quoteBranch(branch), lambda:commands.push(ui, repo, branch=(branch,), **pushOpts)):
+    if tryCommand(ui, "push -f -b %s" % quoteBranch(branch), lambda:commands.push(ui, repo, branch=(branch,), **pushOpts), repo=repo):
       return 1
 
   # Finally, update to dev to avoid confusingly re-opening the closed branch
