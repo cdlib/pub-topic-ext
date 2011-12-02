@@ -199,12 +199,51 @@ def repushChangegroup(ui, repo, hooktype, **opts):
   hgCmd = os.path.abspath(sys.argv[0])
   for target in sorted(targets):
     if target in asyncTargets:
+
+      # Asynchronous mode
       ui.status("Re-pushing asynchronously to target %s:\n" % target)
-      if tryCommand(ui, '-R "%s" push -f %s &' % (repoDir, quoteBranch(target)), \
-                    lambda:os.system('%s -R "%s" push -f "%s" < /dev/null > /dev/null 2> /dev/null &' % \
-                                     (hgCmd, repoDir, target))):
-        return 1
+      ui.status('  hg -R "%s" push -f %s &\n' % (repoDir, quoteBranch(target)))
+
+      # SSH seems very good at detecting child processes, so gyrate to truly detach.
+      # First, fork one child.
+      pid = os.fork()
+      if pid == 0:
+        os.setsid()
+
+        # Fork a second child
+        pid = os.fork()
+        if pid == 0:
+          os.chdir("/")
+          os.umask(0)
+          import resource              # Resource usage information.
+          maxfd = resource.getrlimit(resource.RLIMIT_NOFILE)[1]
+          if (maxfd == resource.RLIM_INFINITY):
+             maxfd = 1024
+          
+          # Iterate through and close all file descriptors.
+          for fd in range(0, maxfd):
+             try:
+                os.close(fd)
+             except OSError:   # ERROR, fd wasn't open to begin with (ignored)
+                pass
+
+          # Redirect the standard I/O file descriptors.
+          # This call to open is guaranteed to return the lowest file descriptor,
+          # which will be 0 (stdin), since it was closed above.
+          os.open("/dev/null", os.O_RDWR)      # standard input (0)
+
+          # Duplicate standard input to standard output and standard error.
+          os.dup2(0, 1)                        # standard output (1)
+          os.dup2(0, 2)                        # standard error (2)
+
+          # Finally, let's try the command
+          os.system('%s -R "%s" push -f "%s"' % ("/Users/mhaye/bin/slowhg", repoDir, target))
+        else:
+          os._exit(0) # first child exits, to guarantee second child is truly orphaned
+
     else:
+
+      # Regular synchronous mode.
       ui.status("Re-pushing to target %s:\n" % target)
       if tryCommand(ui, '-R "%s" push -f %s' % (repoDir, quoteBranch(target)), \
                     lambda:os.system('%s -R "%s" push -f "%s"' % \
