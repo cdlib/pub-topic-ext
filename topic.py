@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.09"
+topicVersion = "2.10"
 
 topicState = {}
 
