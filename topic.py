@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.10"
+topicVersion = "2.11"
 
 topicState = {}
 
@@ -237,7 +237,7 @@ def repushChangegroup(ui, repo, hooktype, **opts):
           os.dup2(0, 2)                        # standard error (2)
 
           # Finally, let's try the command
-          os.system('%s -R "%s" push -f "%s"' % ("/Users/mhaye/bin/slowhg", repoDir, target))
+          os.system('%s -R "%s" push -f "%s"' % ("hg", repoDir, target))
         else:
           os._exit(0) # first child exits, to guarantee second child is truly orphaned
 
@@ -1011,7 +1011,7 @@ def tclose(ui, repo, *args, **opts):
     if tryCommand(ui, "push -f -b %s" % quoteBranch(branch), lambda:commands.push(ui, repo, branch=(branch,), **pushOpts), repo=repo):
       return 1
 
-  # Finally, update to dev to avoid confusingly re-opening the closed branch
+  # Finally, update to prod to avoid confusingly re-opening the closed branch
   if tryCommand(ui, "update %s" % repo.topicProdBranch, lambda:commands.update(ui, repo, node=repo.topicProdBranch)):
     return 1
 
