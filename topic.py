@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.11"
+topicVersion = "2.12"
 
 topicState = {}
 
@@ -405,7 +405,7 @@ def topen(ui, repo, *args, **opts):
 
   # Pull new changes from the central repo
   if not opts.get('nopull', False):
-    if tryCommand(ui, "pull", lambda:commands.pull(ui, repo, **opts)):
+    if tryCommand(ui, "pull", lambda:commands.pull(ui, repo, **opts) >= 2):
       return 1
 
   # Validate the name
@@ -787,7 +787,7 @@ def tfreshen(ui, repo, *args, **opts):
 
   # Pull new changes from the central repo
   if not opts.get('nopull', False):
-    if tryCommand(ui, "pull", lambda:commands.pull(ui, repo, **opts)):
+    if tryCommand(ui, "pull", lambda:commands.pull(ui, repo, **opts) >= 2):
       return 1
 
   # Are there any changes to merge?
@@ -979,7 +979,7 @@ def tclose(ui, repo, *args, **opts):
 
     # Pull new changes from the central repo to avoid multiple-heads problem
     if not opts['nopull'] and not pulled:
-      if tryCommand(ui, "pull", lambda:commands.pull(ui, repo, **opts)):
+      if tryCommand(ui, "pull", lambda:commands.pull(ui, repo, **opts) >= 2):
         return 1
       pulled = True
 
