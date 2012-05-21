@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.13"
+topicVersion = "2.14"
 
 topicState = {}
 
@@ -1005,17 +1005,48 @@ def tclose(ui, repo, *args, **opts):
     if tryCommand(ui, "commit --close-branch", lambda:repo.commit(text, extra = {'close':'True'}) is None):
       return 1
 
+    # Aditionally, for this to not be considered a "head" it has to have a
+    # child commit. So we have to merge into prod. First, update.
+    #
+    if tryCommand(ui, "update %s" % repo.topicProdBranch, lambda:commands.update(ui, repo, node=repo.topicProdBranch)):
+      return 1
+
+    # Now merge, ignoring all conflicts.
+    mergeOpts = copy.deepcopy(opts)
+    mergeOpts['tool'] = "internal:fail"
+    mergeOpts['noninteractive'] = True
+    # Ignore return value... ok if merge fails
+    tryCommand(ui, "merge --tool=internal:fail -r %s" % quoteBranch(branch), 
+               lambda:commands.merge(ui, repo, node=branch, **mergeOpts),
+               repo = repo)
+
+    # Revert all files to prod (regardless of what happened on the branch)
+    revertOpts = copy.deepcopy(opts)
+    revertOpts['all'] = True
+    revertOpts['rev'] = "."
+    if tryCommand(ui, "revert -a -r .", lambda:commands.revert(ui, repo, **revertOpts), repo = repo):
+      return 1
+
+    # Anything that had a merge conflict, mark it resolved (by the revert)
+    resolveOpts = copy.deepcopy(opts)
+    resolveOpts['all'] = True
+    resolveOpts['mark'] = True
+    if tryCommand(ui, "resolve -a -m", lambda:commands.resolve(ui, repo, **resolveOpts), repo = repo):
+      return 1
+
+    # Commit the merge
+    if tryCommand(ui, "commit", lambda:repo.commit(text) is None):
+      return 1
+
     # And push.
     pushOpts = copy.deepcopy(opts)
     if 'message' in pushOpts:
       del pushOpts['message']
     pushOpts['force'] = True
-    if tryCommand(ui, "push -f -b %s" % quoteBranch(branch), lambda:commands.push(ui, repo, branch=(branch,), **pushOpts), repo=repo):
+    if tryCommand(ui, "push -f -b %s -b %s" % (quoteBranch(branch), repo.topicProdBranch), 
+                  lambda:commands.push(ui, repo, branch=(branch,repo.topicProdBranch), **pushOpts), 
+                  repo=repo):
       return 1
-
-  # Finally, update to prod to avoid confusingly re-opening the closed branch
-  if tryCommand(ui, "update %s" % repo.topicProdBranch, lambda:commands.update(ui, repo, node=repo.topicProdBranch)):
-    return 1
 
   ui.status("Done.\n")
 
