@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.12"
+topicVersion = "2.13"
 
 topicState = {}
 
@@ -196,7 +196,9 @@ def repushChangegroup(ui, repo, hooktype, **opts):
 
   # Push to each targeted repository
   repoDir = os.path.dirname(repo.path)
-  hgCmd = os.path.abspath(sys.argv[0])
+  hgCmd = ui.config('topic', 'hg-command')
+  if hgCmd is None:
+    hgCmd = os.path.abspath(sys.argv[0])
   for target in sorted(targets):
     if target in asyncTargets:
 
@@ -237,7 +239,7 @@ def repushChangegroup(ui, repo, hooktype, **opts):
           os.dup2(0, 2)                        # standard error (2)
 
           # Finally, let's try the command
-          os.system('%s -R "%s" push -f "%s"' % ("hg", repoDir, target))
+          os.system('%s -R "%s" push -f "%s"' % (hgCmd, repoDir, target))
         else:
           os._exit(0) # first child exits, to guarantee second child is truly orphaned
 
