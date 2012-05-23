@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.14"
+topicVersion = "2.15"
 
 topicState = {}
 
@@ -1059,7 +1059,7 @@ def tsync(ui, repo, *args, **opts):
   # Pull and update the current repo
   pullOpts = copy.deepcopy(opts)
   pullOpts['update'] = True
-  if tryCommand(ui, "pull -u", lambda:commands.pull(ui, repo, **pullOpts)):
+  if tryCommand(ui, "pull -u", lambda:commands.pull(ui, repo, **pullOpts) >= 2):
     return 1
 
   # Then pull and update the topic extension
