@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.15"
+topicVersion = "2.16"
 
 topicState = {}
 
@@ -206,42 +206,12 @@ def repushChangegroup(ui, repo, hooktype, **opts):
       ui.status("Re-pushing asynchronously to target %s:\n" % target)
       ui.status('  hg -R "%s" push -f %s &\n' % (repoDir, quoteBranch(target)))
 
-      # SSH seems very good at detecting child processes, so gyrate to truly detach.
-      # First, fork one child.
-      pid = os.fork()
-      if pid == 0:
-        os.setsid()
-
-        # Fork a second child
-        pid = os.fork()
-        if pid == 0:
-          os.chdir("/")
-          os.umask(0)
-          import resource              # Resource usage information.
-          maxfd = resource.getrlimit(resource.RLIMIT_NOFILE)[1]
-          if (maxfd == resource.RLIM_INFINITY):
-             maxfd = 1024
-          
-          # Iterate through and close all file descriptors.
-          for fd in range(0, maxfd):
-             try:
-                os.close(fd)
-             except OSError:   # ERROR, fd wasn't open to begin with (ignored)
-                pass
-
-          # Redirect the standard I/O file descriptors.
-          # This call to open is guaranteed to return the lowest file descriptor,
-          # which will be 0 (stdin), since it was closed above.
-          os.open("/dev/null", os.O_RDWR)      # standard input (0)
-
-          # Duplicate standard input to standard output and standard error.
-          os.dup2(0, 1)                        # standard output (1)
-          os.dup2(0, 2)                        # standard error (2)
-
-          # Finally, let's try the command
-          os.system('%s -R "%s" push -f "%s"' % (hgCmd, repoDir, target))
-        else:
-          os._exit(0) # first child exits, to guarantee second child is truly orphaned
+      # Work hard to detach the process. The old way we were doing this was (a) very
+      # complicated, and (b) left zombies galore laying around when running under
+      # RhodeCode on Linux. Not sure why, but hoping this will be better behaved.
+      #
+      os.system('/bin/sh -c "(%s -R \\"%s\\" push -f \\"%s\\" < /dev/null > /dev/null 2> /dev/null &)"' % 
+                (hgCmd, repoDir, target))
 
     else:
 
