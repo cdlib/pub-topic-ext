@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.16"
+topicVersion = "2.17"
 
 topicState = {}
 
@@ -943,7 +943,7 @@ def tclose(ui, repo, *args, **opts):
   if 'tmenu' in opts:
     if ui.prompt("Branch '%s': close it?" % branches[0]).upper() != 'Y':
       return 1
-    opts = { 'nopull':False }
+    opts = { 'nopull':False, 'nopush':False }
 
   pulled = False # only pull once
 
@@ -986,7 +986,7 @@ def tclose(ui, repo, *args, **opts):
     mergeOpts['tool'] = "internal:fail"
     mergeOpts['noninteractive'] = True
     # Ignore return value... ok if merge fails
-    tryCommand(ui, "merge --tool=internal:fail -r %s" % quoteBranch(branch), 
+    tryCommand(ui, "merge -r %s" % quoteBranch(branch), 
                lambda:commands.merge(ui, repo, node=branch, **mergeOpts),
                repo = repo)
 
@@ -1008,7 +1008,8 @@ def tclose(ui, repo, *args, **opts):
     if tryCommand(ui, "commit", lambda:repo.commit(text) is None):
       return 1
 
-    # And push.
+  # And push.
+  if not opts['nopush']:
     pushOpts = copy.deepcopy(opts)
     if 'message' in pushOpts:
       del pushOpts['message']
@@ -1270,7 +1271,8 @@ cmdtable = {
 
     "tclose":        (tclose,
                       [('m', 'message',   None, "use <text> as commit message instead of default 'Closing <branch>'"),
-                       ('P', 'nopull',    None, "don't pull current data from master")]
+                       ('P', 'nopull',    None, "don't pull current data from master"),
+                       ('',  'nopush',    None, "don't push result to master")]
                       + commands.remoteopts,
                       "[branches]"),
 
