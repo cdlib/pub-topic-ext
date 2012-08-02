@@ -1353,6 +1353,9 @@ if __name__ == '__main__':
           print("Command '%s' returned %d." % (proc.cmdLine, proc.returncode))
       procs = newProcs
 
+      # Be sure our log file gets updated
+      sys.stdout.flush()
+
       # Wait for more work
       time.sleep(2)
 
