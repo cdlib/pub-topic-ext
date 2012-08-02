@@ -5,7 +5,7 @@
 Extensions for eScholarship-style topic branches.
 '''
 
-import copy, fcntl, os, re, subprocess, sys, tempfile, time
+import copy, os, re, subprocess, sys, tempfile, time
 from xml import sax
 from StringIO import StringIO
 from mercurial import cmdutil, commands, context, dispatch, extensions, context, hg, patch, url, util
@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.18"
+topicVersion = "2.19"
 
 topicState = {}
 
@@ -1308,6 +1308,12 @@ cmdtable = {
 if __name__ == '__main__':
 
   lockFile = None
+
+  try:
+    import fcntl
+  except ImportError:
+    sys.stderr.write("fcntl not available, cannot lock watcher.")
+    sys.exit(1)
 
   try:
     lockFile = open(os.path.join(os.getenv("HOME"), ".topic_async_lock"), "w+")
