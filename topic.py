@@ -1315,8 +1315,7 @@ if __name__ == '__main__':
     try:
       fcntl.flock(lockFile, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except IOError, e:
-      print("Note: Another watcher is already running.")
-      print("Exiting.")
+      print("(not starting duplicate watcher)")
       sys.exit(0)
 
     lockFile.seek(0)
