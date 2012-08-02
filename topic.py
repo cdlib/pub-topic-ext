@@ -5,7 +5,7 @@
 Extensions for eScholarship-style topic branches.
 '''
 
-import copy, heapq, os, re, sys, traceback
+import copy, fcntl, os, re, subprocess, sys, tempfile, time
 from xml import sax
 from StringIO import StringIO
 from mercurial import cmdutil, commands, context, dispatch, extensions, context, hg, patch, url, util
@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.17"
+topicVersion = "2.18"
 
 topicState = {}
 
@@ -204,14 +204,20 @@ def repushChangegroup(ui, repo, hooktype, **opts):
 
       # Asynchronous mode
       ui.status("Re-pushing asynchronously to target %s:\n" % target)
-      ui.status('  hg -R "%s" push -f %s &\n' % (repoDir, quoteBranch(target)))
+      ui.status('  hg -R "%s" push -f %s *\n' % (repoDir, quoteBranch(target)))
 
-      # Work hard to detach the process. The old way we were doing this was (a) very
-      # complicated, and (b) left zombies galore laying around when running under
-      # RhodeCode on Linux. Not sure why, but hoping this will be better behaved.
+      # Under RhodeCode on Linux there simply doesn't seem to be a way to make
+      # a detached process without leaving zombies galore. Instead, we rely on
+      # having a cron job that starts a watcher. We communicate with the watcher
+      # through temp files.
       #
-      os.system('/bin/sh -c "(%s -R \\"%s\\" push -f \\"%s\\" < /dev/null > /dev/null 2> /dev/null &)"' % 
-                (hgCmd, repoDir, target))
+      tmpDir = os.path.join(os.getenv("HOME"), ".topic_asyncPushes")
+      if not os.path.exists(tmpDir):
+        os.mkdir(tmpDir)
+      (tmpHandle, tmpFile) = tempfile.mkstemp(dir=tmpDir)
+      os.close(tmpHandle)
+      with open(tmpFile, "w") as f:
+        f.write('%s -R "%s" push -f %s\n' % (hgCmd, repoDir, quoteBranch(target)))
 
     else:
 
@@ -1293,4 +1299,68 @@ cmdtable = {
                       ""),
 
 }
+
+#################################################################################
+# Watcher for asynchronous pushes. Start from the command line. Will run forever
+# unless something goes wrong; is intended to be started every 10 minutes by a
+# cron job.
+#
+if __name__ == '__main__':
+
+  lockFile = None
+
+  try:
+    lockFile = open(os.path.join(os.getenv("HOME"), ".topic_async_lock"), "w+")
+
+    try:
+      fcntl.flock(lockFile, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except IOError, e:
+      print("Note: Another watcher is already running.")
+      print("Exiting.")
+      sys.exit(0)
+
+    lockFile.seek(0)
+    lockFile.write("1")
+    lockFile.flush()
+
+    tmpDir = os.path.join(os.getenv("HOME"), ".topic_asyncPushes")
+    print("Waiting for asynchronous pushes to appear in '%s'." % tmpDir)
+    startTime = time.time()
+
+    procs = []
+
+    # Loop forever
+    while True:
+
+      # See if any work has appeared for us to do
+      for tmpName in os.listdir(tmpDir):
+        tmpPath = os.path.join(tmpDir, tmpName)
+        with open(tmpPath, "r") as tmpFile:
+          line = tmpFile.readline().strip()
+          print("Starting command '%s'." % line)
+          proc = subprocess.Popen(line, shell=True)
+          proc.cmdLine = line
+          procs.append(proc)
+        os.remove(tmpPath)
+
+      # Clean up any sub-processes that are done.
+      newProcs = []
+      for proc in procs:
+        proc.poll()
+        if proc.returncode is None:
+          newProcs.append(proc)
+        else:
+          print("Command '%s' returned %d." % (proc.cmdLine, proc.returncode))
+      procs = newProcs
+
+      # Wait for more work
+      time.sleep(2)
+
+  # And be sure to unlock the control lock file
+  finally:
+    if lockFile is not None:
+      lockFile.seek(0)
+      lockFile.write("0")
+      fcntl.flock(lockFile, fcntl.LOCK_UN)
+      lockFile.close()
 
