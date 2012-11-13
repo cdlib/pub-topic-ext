@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.19"
+topicVersion = "2.20"
 
 topicState = {}
 
@@ -846,6 +846,12 @@ def tpush(ui, repo, *args, **opts):
     if 'P' in resp: args.append(repo.topicProdBranch)
 
     opts = { 'nopull':False, 'nocommit':False, 'message':None }
+
+  # If pushing to prod, get extra verification from the user
+  if repo.topicProdBranch in args:
+    res = ui.prompt("This will push to production. Okay to proceed?")
+    if res.lower() != "y" and res.lower() != "yes":
+      raise util.Abort("Ok.")
 
   # We'll use a special set of options for hg push commands
   pushOpts = copy.deepcopy(opts)
