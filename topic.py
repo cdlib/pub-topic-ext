@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.20"
+topicVersion = "2.21"
 
 topicState = {}
 
@@ -490,6 +490,25 @@ def printColumns(ui, colNames, rows, indent=0):
 
 
 #################################################################################
+def getBranchTags(repo):
+
+  # Mercurial < 2.9
+  if hasattr(repo, 'branchtags'):
+    return repo.branchtags()
+
+  # Mercurial >= 2.9
+  def branchtip(repo, heads):
+    tip = heads[-1]
+    for h in reversed(heads):
+      if not repo[h].closesbranch():
+        tip = h
+        break
+    return tip
+  return {bn: branchtip(repo, heads)
+          for bn, heads in repo.branchmap().iteritems()}
+
+
+#################################################################################
 def topicBranches(repo, closed = False):
   """ Get a list of the topic branches, ordered by descending date of last change. 
       Each list entry is a tuple (branchname, headCtx) """
@@ -520,7 +539,7 @@ def topicBranches(repo, closed = False):
 
   # Process each branch
   result = []
-  for tag, node in repo.branchtags().items():
+  for tag, node in getBranchTags(repo).items():
 
     # Skip prod
     if tag in repo.topicSpecialBranches:
