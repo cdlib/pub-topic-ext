@@ -504,8 +504,10 @@ def getBranchTags(repo):
         tip = h
         break
     return tip
-  return {bn: branchtip(repo, heads)
-          for bn, heads in repo.branchmap().iteritems()}
+  result = {}
+  for bn, heads in repo.branchmap().iteritems():
+    result[bn] = branchtip(repo, heads)
+  return result
 
 
 #################################################################################
@@ -1399,10 +1401,9 @@ if __name__ == '__main__':
         tmpPath = os.path.join(tmpDir, tmpName)
         with open(tmpPath, "r") as tmpFile:
           line = tmpFile.readline().strip()
-          if line.endswith(" prod"):
-            print("%s: Waiting 10 sec before prod command '%s'." % (datetime.datetime.now().isoformat(), line))
-            sys.stdout.flush()
-            time.sleep(5)
+          print("%s: Waiting 5 sec before async command '%s'." % (datetime.datetime.now().isoformat(), line))
+          sys.stdout.flush()
+          time.sleep(5)
           print("%s: Starting command '%s'." % (datetime.datetime.now().isoformat(), line))
           sys.stdout.flush()
           proc = subprocess.Popen(line, shell=True)
