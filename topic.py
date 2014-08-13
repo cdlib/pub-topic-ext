@@ -5,7 +5,7 @@
 Extensions for eScholarship-style topic branches.
 '''
 
-import copy, os, re, subprocess, sys, tempfile, time
+import copy, datetime, os, re, subprocess, sys, tempfile, time
 from xml import sax
 from StringIO import StringIO
 from mercurial import cmdutil, commands, context, dispatch, extensions, context, hg, patch, url, util
@@ -1399,7 +1399,12 @@ if __name__ == '__main__':
         tmpPath = os.path.join(tmpDir, tmpName)
         with open(tmpPath, "r") as tmpFile:
           line = tmpFile.readline().strip()
-          print("Starting command '%s'." % line)
+          if line.endswith(" prod"):
+            print("%s: Waiting 10 sec before prod command '%s'." % (datetime.datetime.now().isoformat(), line))
+            sys.stdout.flush()
+            time.sleep(5)
+          print("%s: Starting command '%s'." % (datetime.datetime.now().isoformat(), line))
+          sys.stdout.flush()
           proc = subprocess.Popen(line, shell=True)
           proc.cmdLine = line
           procs.append(proc)
@@ -1412,7 +1417,8 @@ if __name__ == '__main__':
         if proc.returncode is None:
           newProcs.append(proc)
         else:
-          print("Command '%s' returned %d." % (proc.cmdLine, proc.returncode))
+          print("%s: Command '%s' returned %d." % (datetime.datetime.now().isoformat(), proc.cmdLine, proc.returncode))
+          sys.stdout.flush()
       procs = newProcs
 
       # Be sure our log file gets updated
