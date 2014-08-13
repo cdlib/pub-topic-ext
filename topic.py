@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.21"
+topicVersion = "2.3"
 
 topicState = {}
 
@@ -668,6 +668,7 @@ def tlog(ui, repo, *pats, **opts):
 def tryCommand(ui, descrip, commandFunc, showOutput = False, repo = None):
   """ Run a command and capture its output. Print the output only if it fails. """
 
+  ui.lastTryCommandOutput = ""
   ui.status("  hg %s\n" % descrip)
   ui.flush()
 
@@ -693,6 +694,12 @@ def tryCommand(ui, descrip, commandFunc, showOutput = False, repo = None):
     if repo and hasattr(repo, 'baseui'):
       oldBaseFout = repo.baseui.fout
       repo.baseui.fout = buffer
+  if hasattr(ui, 'ferr'): # new for Mercurial 2.8+ (approx)
+    oldFerr = ui.ferr
+    ui.ferr = buffer
+    if repo and hasattr(repo, 'baseui'):
+      oldBaseFerr = repo.baseui.ferr
+      repo.baseui.ferr = buffer
 
   # Now run the command
   res = 1
@@ -708,10 +715,19 @@ def tryCommand(ui, descrip, commandFunc, showOutput = False, repo = None):
       ui.fout = oldFout
       if repo and hasattr(repo, 'baseui'):
         repo.baseui.fout = oldBaseFout
+    if hasattr(ui, 'ferr'): # new for Mercurial 2.8+ (approx)
+      ui.ferr = oldFerr
+      if repo and hasattr(repo, 'baseui'):
+        repo.baseui.ferr = oldBaseFerr
+
+    # If we were suppressing output but there's been an error, show it.
     outFunc = ui.warn if (res and not ui.verbose and not showOutput) else lambda x: x
     outFunc("\n")
     for line in buffer.getvalue().split("\n"):
       outFunc("    " + line + "\n")
+
+    # Record the output for reference
+    ui.lastTryCommandOutput = buffer.getvalue()
 
   # All done; let the caller know how it went.
   return res
@@ -930,11 +946,27 @@ def tpush(ui, repo, *args, **opts):
 
     # Push to the correct server
     if mergeTo == repo.topicProdBranch:
-      if tryCommand(ui, "push -f -b %s" % repo.topicProdBranch,
-                    lambda:commands.push(ui, repo, branch=(repo.topicProdBranch,), **pushOpts),
-                    repo=repo):
-        return 1
+      pushOpts['force'] = False # Don't create new heads
+      try:
+        if tryCommand(ui, "push -b %s" % repo.topicProdBranch,
+                      lambda:commands.push(ui, repo, branch=(repo.topicProdBranch,), **pushOpts),
+                      repo=repo, showOutput=True):
+          return 1
+      except Exception, e:
+        if "Not allowed to create multiple heads in the same branch" in ui.lastTryCommandOutput \
+           or "push creates new remote head" in ui.lastTryCommandOutput \
+           or "push creates new remote head" in str(e):
+          print("Attempting to repair multiple heads.")
+          if repo.dirstate.branch() != topicBranch:
+            if tryCommand(ui, "update %s" % quoteBranch(topicBranch), lambda:hg.update(repo, topicBranch)):
+              return 1
+          topicDir = os.path.dirname(__file__)
+          repairScript = os.path.join(topicDir, "repair.py")
+          subprocess.check_call([repairScript, repo.topicProdBranch, 'default'])
+        else:
+          raise
     else:
+      pushOpts['force'] = True # We often need to create new branches
       if tryCommand(ui, "push -f -b %s %s" % (topicBranch, mergeTo),
                     lambda:commands.push(ui, repo, branch=(topicBranch,), dest=mergeTo, **pushOpts),
                     repo=repo):
