@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.3"
+topicVersion = "2.3.1"
 
 topicState = {}
 
@@ -892,11 +892,11 @@ def tpush(ui, repo, *args, **opts):
 
   # We'll use a special set of options for hg push commands
   pushOpts = copy.deepcopy(opts)
-  pushOpts['force'] = True # we very often create new branches and it's okay!
+  pushOpts['new_branch'] = True  # allow pushing new branches
 
   # If no branch was specified, just share the current branch
   if len(args) < 1:
-    if tryCommand(ui, "push -f -b %s" % quoteBranch(topicBranch),
+    if tryCommand(ui, "push --new-branch -b %s" % quoteBranch(topicBranch),
                   lambda:commands.push(ui, repo, branch=(topicBranch,), **pushOpts),
                   repo=repo):
       return 1
@@ -948,9 +948,8 @@ def tpush(ui, repo, *args, **opts):
 
     # Push to the correct server
     if mergeTo == repo.topicProdBranch:
-      pushOpts['force'] = False # Don't create new heads
       try:
-        if tryCommand(ui, "push -b %s" % repo.topicProdBranch,
+        if tryCommand(ui, "push --new-branch -b %s" % repo.topicProdBranch,
                       lambda:commands.push(ui, repo, branch=(repo.topicProdBranch,), **pushOpts),
                       repo=repo, showOutput=True):
           return 1
@@ -968,8 +967,7 @@ def tpush(ui, repo, *args, **opts):
         else:
           raise
     else:
-      pushOpts['force'] = True # We often need to create new branches
-      if tryCommand(ui, "push -f -b %s %s" % (topicBranch, mergeTo),
+      if tryCommand(ui, "push --new-branch -b %s %s" % (topicBranch, mergeTo),
                     lambda:commands.push(ui, repo, branch=(topicBranch,), dest=mergeTo, **pushOpts),
                     repo=repo):
         return 1
