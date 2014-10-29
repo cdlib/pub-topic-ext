@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.3.1"
+topicVersion = "2.3.2"
 
 topicState = {}
 
@@ -1060,12 +1060,19 @@ def tclose(ui, repo, *args, **opts):
     if tryCommand(ui, "revert -a -r .", lambda:commands.revert(ui, repo, **revertOpts), repo = repo):
       return 1
 
-    # Anything that had a merge conflict, mark it resolved (by the revert)
+    # Were there any merge conflicts?
     resolveOpts = copy.deepcopy(opts)
-    resolveOpts['all'] = True
-    resolveOpts['mark'] = True
-    if tryCommand(ui, "resolve -a -m", lambda:commands.resolve(ui, repo, **resolveOpts), repo = repo):
+    resolveOpts['list'] = True
+    if tryCommand(ui, "resolve -l", lambda:commands.resolve(ui, repo, **resolveOpts), repo = repo):
       return 1
+
+    # Anything that had a merge conflict, mark it resolved (by the revert)
+    if ui.lastTryCommandOutput != '':
+      resolveOpts = copy.deepcopy(opts)
+      resolveOpts['all'] = True
+      resolveOpts['mark'] = True
+      if tryCommand(ui, "resolve -a -m", lambda:commands.resolve(ui, repo, **resolveOpts), repo = repo):
+        return 1
 
     # Commit the merge
     if tryCommand(ui, "commit", lambda:repo.commit(text) is None):
