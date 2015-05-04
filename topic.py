@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.3.2"
+topicVersion = "2.4.0"
 
 topicState = {}
 
@@ -885,10 +885,19 @@ def tpush(ui, repo, *args, **opts):
     opts = { 'nopull':False, 'nocommit':False, 'message':None }
 
   # If pushing to prod, get extra verification from the user
+  nameSet = set()
+  for name, path in ui.configitems("paths"):
+    nameSet.add(name)
   if repo.topicProdBranch in args:
+    if not repo.topicProdBranch in nameSet:
+      raise util.Abort("Error: '%s' server path not configured in .hg/hgrc." % repo.topicProdBranch)
     res = ui.prompt("This will push to production. Okay to proceed?")
     if res.lower() != "y" and res.lower() != "yes":
       raise util.Abort("Ok.")
+    if "stage" in nameSet and not "stage" in args:
+      args = ["stage"] + list(args)
+    if "dev" in nameSet and not "dev" in args:
+      args = ["dev"] + list(args)
 
   # We'll use a special set of options for hg push commands
   pushOpts = copy.deepcopy(opts)
@@ -905,7 +914,62 @@ def tpush(ui, repo, *args, **opts):
 
   commitStop = False # note if we get to that step
 
-  # Okay, let's go for it.
+  # If pushing to prod, merge changes from this branch into the prod branch.
+  alreadyMerged = [p.branch() for p in repo.parents()[0].children()]
+  if repo.topicProdBranch in args and not repo.topicProdBranch in alreadyMerged:
+
+    # Freshen with recent changes from prod
+    freshenOpts = copy.deepcopy(opts)
+    freshenOpts['terse'] = True # avoid printing "Done." at end
+    if tfreshen(ui, repo, *args, **freshenOpts):
+      return 1
+
+    # Update to the prod
+    if tryCommand(ui, "update %s" % quoteBranch(repo.topicProdBranch), lambda:hg.update(repo, repo.topicProdBranch)):
+      return 1
+
+    # Merge from the topic branch
+    if doMerge(ui, repo, topicBranch):
+      return 1
+
+    # Stop if requested.
+    if opts['nocommit']:
+      ui.status("\nStopping before commit as requested.\n")
+      commitStop = True
+      return 0
+
+    # Unlike a normal hg commit, if no text is specified we supply a reasonable default.
+    text = opts.get('message')
+    if text is None:
+      text = "Merge %s to %s" % (topicBranch, repo.topicProdBranch)
+
+    # Commit the merge.
+    if tryCommand(ui, "commit", lambda:repo.commit(text) is None):
+      return 1
+
+  # For prod, push to the central repo as well as the servers.
+  if repo.topicProdBranch in args:
+    try:
+      if tryCommand(ui, "push --new-branch -b %s" % repo.topicProdBranch,
+                    lambda:commands.push(ui, repo, branch=(repo.topicProdBranch,), **pushOpts),
+                    repo=repo, showOutput=True) > 1:
+        return 1
+    except Exception, e:
+      if "Not allowed to create multiple heads in the same branch" in ui.lastTryCommandOutput \
+         or "push creates new remote head" in ui.lastTryCommandOutput \
+         or "push creates new remote head" in str(e):
+        print("Attempting to repair multiple heads.")
+        if repo.dirstate.branch() != topicBranch:
+          if tryCommand(ui, "update %s" % quoteBranch(topicBranch), lambda:hg.update(repo, topicBranch)) > 1:
+            return 1
+        topicDir = os.path.dirname(__file__)
+        repairScript = os.path.join(topicDir, "repair.py")
+        subprocess.check_call([repairScript, repo.topicProdBranch, 'default'])
+      else:
+        raise
+
+  # Now push to each server
+  branchToPush = repo.topicProdBranch if repo.topicProdBranch in args else topicBranch
   for mergeTo in args:
 
     # Cannot merge to default, or to a topic branch
@@ -913,64 +977,14 @@ def tpush(ui, repo, *args, **opts):
       ui.warn("Cannot merge to '%s' branch.\n" % mergeTo)
       return 1
 
-    # Merge if necessary (only to prod branch)
-    alreadyMerged = [p.branch() for p in repo.parents()[0].children()]
-    if mergeTo == repo.topicProdBranch and not mergeTo in alreadyMerged:
-
-      # Freshen with recent changes from prod
-      freshenOpts = copy.deepcopy(opts)
-      freshenOpts['terse'] = True # avoid printing "Done." at end
-      if tfreshen(ui, repo, *args, **freshenOpts):
-        return 1
-
-      # Update to the prod
-      if tryCommand(ui, "update %s" % quoteBranch(mergeTo), lambda:hg.update(repo, mergeTo)):
-        return 1
-
-      # Merge from the topic branch
-      if doMerge(ui, repo, topicBranch):
-        return 1
-
-      # Stop if requested.
-      if opts['nocommit']:
-        ui.status("\nStopping before commit as requested.\n")
-        commitStop = True
-        return 0
-
-      # Unlike a normal hg commit, if no text is specified we supply a reasonable default.
-      text = opts.get('message')
-      if text is None:
-        text = "Merge %s to %s" % (topicBranch, mergeTo)
-
-      # Commit the merge.
-      if tryCommand(ui, "commit", lambda:repo.commit(text) is None):
-        return 1
-
     # Push to the correct server
-    if mergeTo == repo.topicProdBranch:
-      try:
-        if tryCommand(ui, "push --new-branch -b %s" % repo.topicProdBranch,
-                      lambda:commands.push(ui, repo, branch=(repo.topicProdBranch,), **pushOpts),
-                      repo=repo, showOutput=True):
-          return 1
-      except Exception, e:
-        if "Not allowed to create multiple heads in the same branch" in ui.lastTryCommandOutput \
-           or "push creates new remote head" in ui.lastTryCommandOutput \
-           or "push creates new remote head" in str(e):
-          print("Attempting to repair multiple heads.")
-          if repo.dirstate.branch() != topicBranch:
-            if tryCommand(ui, "update %s" % quoteBranch(topicBranch), lambda:hg.update(repo, topicBranch)):
-              return 1
-          topicDir = os.path.dirname(__file__)
-          repairScript = os.path.join(topicDir, "repair.py")
-          subprocess.check_call([repairScript, repo.topicProdBranch, 'default'])
-        else:
-          raise
-    else:
-      if tryCommand(ui, "push --new-branch -b %s %s" % (topicBranch, mergeTo),
-                    lambda:commands.push(ui, repo, branch=(topicBranch,), dest=mergeTo, **pushOpts),
-                    repo=repo):
+    if mergeTo in nameSet:
+      if tryCommand(ui, "push --new-branch -b %s %s" % (branchToPush, mergeTo),
+                    lambda:commands.push(ui, repo, branch=(branchToPush,), dest=mergeTo, **pushOpts),
+                    repo=repo) > 1:   # 1 means nothing to push, which is ok
         return 1
+    else:
+      print("Note: No path for server '%s' is configured in .hg/hgrc." % mergeTo)
 
     # Record the push so we can display the right branch status later
     readTopicState(repo)
