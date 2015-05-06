@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.4.0"
+topicVersion = "2.4.1"
 
 topicState = {}
 
@@ -950,9 +950,9 @@ def tpush(ui, repo, *args, **opts):
   # For prod, push to the central repo as well as the servers.
   if repo.topicProdBranch in args:
     try:
-      if tryCommand(ui, "push --new-branch -b %s" % repo.topicProdBranch,
+      if tryCommand(ui, "push --new-branch -b %s default" % repo.topicProdBranch,
                     lambda:commands.push(ui, repo, branch=(repo.topicProdBranch,), **pushOpts),
-                    repo=repo, showOutput=True) > 1:
+                    repo=repo) > 1:
         return 1
     except Exception, e:
       if "Not allowed to create multiple heads in the same branch" in ui.lastTryCommandOutput \
@@ -1098,10 +1098,28 @@ def tclose(ui, repo, *args, **opts):
     if 'message' in pushOpts:
       del pushOpts['message']
     pushOpts['force'] = True
-    if tryCommand(ui, "push -f -b %s -b %s" % (quoteBranch(branch), repo.topicProdBranch), 
+    nameSet = set()
+    for name, path in ui.configitems("paths"):
+      nameSet.add(name)
+    if tryCommand(ui, "push -f -b %s -b %s default" % (quoteBranch(branch), repo.topicProdBranch), 
                   lambda:commands.push(ui, repo, branch=(branch,repo.topicProdBranch), **pushOpts), 
-                  repo=repo):
+                  repo=repo) > 1:
       return 1
+    if "dev" in nameSet:
+      if tryCommand(ui, "push -f -b %s -b %s dev" % (quoteBranch(branch), repo.topicProdBranch), 
+                    lambda:commands.push(ui, repo, branch=(branch,repo.topicProdBranch), dest="dev", **pushOpts), 
+                    repo=repo) > 1:
+        return 1
+    if "stage" in nameSet:
+      if tryCommand(ui, "push -f -b %s -b %s stage" % (quoteBranch(branch), repo.topicProdBranch), 
+                    lambda:commands.push(ui, repo, branch=(branch,repo.topicProdBranch), dest="stage", **pushOpts), 
+                    repo=repo) > 1:
+        return 1
+    if "prod" in nameSet:
+      if tryCommand(ui, "push -f -b %s -b %s prod" % (quoteBranch(branch), repo.topicProdBranch), 
+                    lambda:commands.push(ui, repo, branch=(branch,repo.topicProdBranch), dest="prod", **pushOpts), 
+                    repo=repo) > 1:
+        return 1
 
   ui.status("Done.\n")
 
