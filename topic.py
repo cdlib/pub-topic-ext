@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.4.1"
+topicVersion = "2.4.2"
 
 topicState = {}
 
@@ -947,6 +947,11 @@ def tpush(ui, repo, *args, **opts):
     if tryCommand(ui, "commit", lambda:repo.commit(text) is None):
       return 1
 
+    # And return to the original topic branch
+    if repo.dirstate.branch() != topicBranch:
+      if tryCommand(ui, "update %s" % quoteBranch(topicBranch), lambda:hg.update(repo, topicBranch)):
+        return 1
+
   # For prod, push to the central repo as well as the servers.
   if repo.topicProdBranch in args:
     try:
@@ -992,11 +997,6 @@ def tpush(ui, repo, *args, **opts):
       topicState[topicBranch] = {}
     topicState[topicBranch][mergeTo] = repo[repo.dirstate.parents()[0]].hex()
     writeTopicState(repo)
-
-  # And return to the original topic branch
-  if repo.dirstate.branch() != topicBranch:
-    if tryCommand(ui, "update %s" % quoteBranch(topicBranch), lambda:hg.update(repo, topicBranch)):
-      return 1
 
   ui.status("Done.\n")
 
