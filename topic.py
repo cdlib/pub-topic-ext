@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.4.2"
+topicVersion = "2.4.3"
 
 topicState = {}
 
@@ -915,7 +915,7 @@ def tpush(ui, repo, *args, **opts):
   commitStop = False # note if we get to that step
 
   # If pushing to prod, merge changes from this branch into the prod branch.
-  alreadyMerged = [p.branch() for p in repo.parents()[0].children()]
+  alreadyMerged = [p.branch() for p in repo[None].parents()[0].children()]
   if repo.topicProdBranch in args and not repo.topicProdBranch in alreadyMerged:
 
     # Freshen with recent changes from prod
