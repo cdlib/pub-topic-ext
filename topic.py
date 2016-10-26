@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.4.3"
+topicVersion = "2.4.4"
 
 topicState = {}
 
@@ -1231,7 +1231,7 @@ def tmenu(ui, repo, *args, **opts):
         except Exception:
           pass
         ui.warn("Error: ")
-        ui.warn(e)
+        ui.warn("%r" % e)
         ui.warn("\n")
     else:
       ui.status("Unknown option: '%s'\n" % resp)
