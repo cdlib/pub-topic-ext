@@ -13,9 +13,12 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.4.4"
+topicVersion = "2.4.5"
 
 topicState = {}
+
+cmdtable = {}
+command = cmdutil.command(cmdtable)
 
 #################################################################################
 def ruleError(ui, message):
@@ -365,6 +368,10 @@ def calcBranchState(repo, branch, node):
 
 
 #################################################################################
+@command("topen|tnew",
+          [('C', 'clean',  None, "discard uncommitted changes (no backup)"),
+           ('P', 'nopull', None, "don't pull current data from master")],
+          "newbranchname")
 def topen(ui, repo, *args, **opts):
   """ open (create) a new topic branch """
 
@@ -405,8 +412,11 @@ def topen(ui, repo, *args, **opts):
 
   text = "Opening branch %s" % quoteBranch(target)
   return tryCommand(ui, "commit", lambda:repo.commit(text) is None)
-                    
+
 #################################################################################
+@command("tbranch|tb",
+         [('C', 'clean', None, "discard uncommitted changes (no backup)")],
+         "[branchname]")
 def tbranch(ui, repo, *args, **opts):
 
   """ show current branch status or switch to a different branch """
@@ -577,6 +587,9 @@ def topicBranchNames(repo, closed = False):
 
 
 #################################################################################
+@command("tbranches|tbs",
+         [('c', 'closed', None, "include closed branches")],
+         "")
 def tbranches(ui, repo, *args, **kwargs):
   """ show recent activity on the currently open topic branches """
 
@@ -609,6 +622,11 @@ def tbranches(ui, repo, *args, **kwargs):
 
 
 #################################################################################
+@command("tlog|tl",
+         [('a', 'all', None, "all topic branches, not just current"),
+          ('c', 'closed', None, "include closed branches")] \
+          + commands.templateopts,
+         "[branches]")
 def tlog(ui, repo, *pats, **opts):
   """ show revision history of the current branch (or all branches) """
 
@@ -788,6 +806,11 @@ def doMerge(ui, repo, branch):
   return 0
 
 ###############################################################################
+@command("tfreshen|tf",
+         [('P', 'nopull',    None, "don't pull current data from master"),
+          ('C', 'nocommit',  None, "merge only, don't commit")] 
+          + commands.remoteopts,
+          "")
 def tfreshen(ui, repo, *args, **opts):
   """ Pull recent changes from prod and merge them into the current branch. """
 
@@ -857,6 +880,12 @@ def readTopicState(repo):
       topicState = eval(f.read(), {}, {})
 
 ###############################################################################
+@command("tpush|tp",
+         [('m', 'message',   None, "use <text> as commit message instead of default 'Merge to <branch>'"),
+          ('P', 'nopull',    None, "don't pull current data from master"),
+          ('C', 'nocommit',  None, "merge only, don't commit or push")] 
+          + commands.remoteopts,
+         "dev|stage|prod")
 def tpush(ui, repo, *args, **opts):
   """ Push current branch to dev, stage, or production (and merge if prod). """
 
@@ -1001,6 +1030,12 @@ def tpush(ui, repo, *args, **opts):
   ui.status("Done.\n")
 
 ###############################################################################
+@command("tclose",
+         [('m', 'message',   None, "use <text> as commit message instead of default 'Closing <branch>'"),
+          ('P', 'nopull',    None, "don't pull current data from master"),
+          ('',  'nopush',    None, "don't push result to master")]
+         + commands.remoteopts,
+         "[branches]")
 def tclose(ui, repo, *args, **opts):
   """ close the current topic branch and push to the central repository """
 
@@ -1124,6 +1159,7 @@ def tclose(ui, repo, *args, **opts):
   ui.status("Done.\n")
 
 ###############################################################################
+@command("tsync", [], "")
 def tsync(ui, repo, *args, **opts):
   """ synchronize (pull & update) the current repo; also the topic extension itself. """
 
@@ -1148,9 +1184,10 @@ def tsync(ui, repo, *args, **opts):
       ui.status("...restarting menu.\n")
       os.system("hg tmenu")
       sys.exit(0)
-      
+
 
 ###############################################################################
+@command("tmenu", [], "")
 def tmenu(ui, repo, *args, **opts):
   """ menu-driven interface to the 'topic' extension """
 
@@ -1239,6 +1276,7 @@ def tmenu(ui, repo, *args, **opts):
 
 
 ###############################################################################
+@command("tversion", [], "")
 def tversion(ui, repo, *args, **opts):
   """ print out the version of the topic extension """
 
@@ -1246,6 +1284,7 @@ def tversion(ui, repo, *args, **opts):
 
 
 #################################################################################
+@command("tsetup", [], "")
 def tsetup(ui, repo, *args, **kwargs):
   """ Used to set up the topic extension in a pre-configured directory.
       We look for a prod branch in the current directory, and try to find a 
@@ -1334,67 +1373,6 @@ def uisetup(ui):
 
   extensions.wrapcommand(commands.table, 'push', checkPush)
 
-
-#################################################################################
-# Table of commands we're adding.
-#
-cmdtable = {
-    "topen|tnew":    (topen,
-                      [('C', 'clean', None, 'discard uncommitted changes (no backup)'),
-                       ('P', 'nopull',    None, "don't pull current data from master")],
-                      "newbranchname"),
-
-    "tbranch|tb":    (tbranch,
-                      [('C', 'clean', None, 'discard uncommitted changes (no backup)')],
-                      "[branchname]"),
-
-    "tbranches|tbs": (tbranches,
-                      [('c', 'closed', None, "include closed branches")],
-                      ""),
-
-    "tlog|tl":       (tlog,
-                      [('a', 'all', None, "all topic branches, not just current"),
-                       ('c', 'closed', None, "include closed branches")] \
-                       + commands.templateopts,
-                      "[branches]"),
-
-    "tfreshen|tf":   (tfreshen,
-                      [('P', 'nopull',    None, "don't pull current data from master"),
-                       ('C', 'nocommit',  None, "merge only, don't commit")] 
-                       + commands.remoteopts,
-                       ""),
-
-    "tpush|tp":      (tpush,
-                      [('m', 'message',   None, "use <text> as commit message instead of default 'Merge to <branch>'"),
-                       ('P', 'nopull',    None, "don't pull current data from master"),
-                       ('C', 'nocommit',  None, "merge only, don't commit or push")] 
-                       + commands.remoteopts,
-                      "dev|stage|prod"),
-
-    "tclose":        (tclose,
-                      [('m', 'message',   None, "use <text> as commit message instead of default 'Closing <branch>'"),
-                       ('P', 'nopull',    None, "don't pull current data from master"),
-                       ('',  'nopush',    None, "don't push result to master")]
-                      + commands.remoteopts,
-                      "[branches]"),
-
-    "tmenu":         (tmenu,
-                      [],
-                      ""),
-
-    "tsync":         (tsync,
-                      [],
-                      ""),
-
-    "tversion":      (tversion,
-                      [],
-                      ""),
-
-    "tsetup":        (tsetup,
-                      [],
-                      ""),
-
-}
 
 #################################################################################
 # Watcher for asynchronous pushes. Start from the command line. Will run forever
