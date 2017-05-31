@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.4.5"
+topicVersion = "2.4.6"
 
 topicState = {}
 
@@ -1173,10 +1173,10 @@ def tsync(ui, repo, *args, **opts):
 
   # Then pull and update the topic extension
   topicDir = os.path.dirname(__file__)
-  timeBefore = os.path.getmtime(os.path.join(topicDir, ".hg"))
+  timeBefore = os.path.getmtime(os.path.join(topicDir, "topic.py"))
   if tryCommand(ui, "pull -R %s -u" % quoteBranch(topicDir), lambda:os.system('hg pull -R "%s" --quiet -u' % topicDir)):
     return 1
-  timeAfter = os.path.getmtime(os.path.join(topicDir, ".hg"))
+  timeAfter = os.path.getmtime(os.path.join(topicDir, "topic.py"))
 
   if timeBefore != timeAfter:
     ui.status("Note: Topic extension has been updated.\n")
