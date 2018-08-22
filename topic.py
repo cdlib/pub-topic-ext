@@ -13,7 +13,7 @@ from mercurial.node import nullid, nullrev
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.4.6"
+topicVersion = "2.4.7"
 
 topicState = {}
 
@@ -558,7 +558,9 @@ def topicBranches(repo, closed = False):
       continue
 
     # Skip closed branches if requested
-    hn = repo.lookup(node)
+    ## The next line used to be `repo.lookup(node)`, but that stopped working in hg 4.6.
+    ## Not sure why/whether it was ever needed.
+    hn = node
     if not closed:
       if not hn in repo.branchheads(tag, closed=False):
         continue
