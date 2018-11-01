@@ -11,6 +11,17 @@ from StringIO import StringIO
 from mercurial import cmdutil, commands, context, dispatch, extensions, context, hg, patch, url, util
 from mercurial.node import nullid, nullrev
 
+# Changed API in Mercurial 4.7
+try:
+  from mercurial import utils
+  def shortuser(ui, user):
+    return ui.shortuser(user)
+  shortdate = utils.dateutil.shortdate
+except ImportError:
+  def shortuser(ui, user):
+    return util.shortuser(user)
+  shortdate = util.shortdate
+
 global origCalcChangectxAncestor
 
 topicVersion = "2.4.7"
@@ -18,7 +29,17 @@ topicVersion = "2.4.7"
 topicState = {}
 
 cmdtable = {}
-command = cmdutil.command(cmdtable)
+
+try:
+  from mercurial import registrar, scmutil
+  command = registrar.command(cmdtable)
+  revsymbol = scmutil.revsymbol
+  isbinary = util.stringutil.binary
+except ImportError:
+  command = cmdutil.command(cmdtable)
+  def revsymbol(repo, branch):
+    return branch
+  isbinary = util.binary
 
 #################################################################################
 def ruleError(ui, message):
@@ -54,7 +75,7 @@ def checkXML(ui, repo, node):
   changedOrAdded = status[0] + status[1]
   for filename in changedOrAdded:
     data = ctx[filename].data()
-    if util.binary(data):
+    if isbinary(data):
       continue
     if data.startswith("<?xml ") and not re.search("\.dtd", filename):
       try:
@@ -101,7 +122,7 @@ def checkBranch(ui, repo, node):
   if thisBranch != p1Branch and p1Branch != repo.topicProdBranch:
 
     # Previously we allowed branching from dev; no longer.
-    if util.shortdate(ctx.date()) >= "2010-07-07":
+    if shortdate(ctx.date()) >= "2010-07-07":
       return ruleError(ui, "Topics are only allowed to branch from '%s' directly." % repo.topicProdBranch)
 
   # New branches may only branch from prod
@@ -606,8 +627,8 @@ def tbranches(ui, repo, *args, **kwargs):
 
     # Determine all the field values we're going to print
     branches.add(branch)
-    user = util.shortuser(ctx.user())
-    date = util.shortdate(ctx.date())
+    user = shortuser(ui, ctx.user())
+    date = shortdate(ctx.date())
     branchState = calcBranchState(repo, branch, ctx.node())
 
     descrip = ctx.description().splitlines()[0].strip()
@@ -674,11 +695,11 @@ def tlog(ui, repo, *pats, **opts):
         kind = "*" + kind
 
       if kind:
-        user = util.shortuser(ctx.user())
-        date = util.shortdate(ctx.date())
+        user = shortuser(ui, ctx.user())
+        date = shortdate(ctx.date())
         descrip = ctx.description().splitlines()[0].strip()
         if len(descrip) > 60: descrip = descrip[0:57] + "..."
-        toPrint.append((int(ctx), user, date, kind, descrip))
+        toPrint.append((ctx.rev(), user, date, kind, descrip))
 
     # To get same order as hg log
     toPrint.reverse()
@@ -790,7 +811,7 @@ def doMerge(ui, repo, branch):
   """ Merge from the given branch into the working directory. """
 
   # Try the merge. Don't hide the output as merge sometimes needs to ask the user questions.
-  if tryCommand(ui, "merge %s" % quoteBranch(branch), lambda:hg.merge(repo, branch), showOutput = True):
+  if tryCommand(ui, "merge %s" % quoteBranch(branch), lambda:hg.merge(repo, revsymbol(repo, branch)), showOutput = True):
     res = ui.prompt("Merge failed! Do you want to fix it manually? (if not, will return to clean state):", default="y")
     if res.lower() != "y" and res.lower() != "yes":
       ui.status("Getting back to clean state...\n")
@@ -956,7 +977,8 @@ def tpush(ui, repo, *args, **opts):
       return 1
 
     # Update to the prod
-    if tryCommand(ui, "update %s" % quoteBranch(repo.topicProdBranch), lambda:hg.update(repo, repo.topicProdBranch)):
+    if tryCommand(ui, "update %s" % quoteBranch(repo.topicProdBranch),
+                  lambda:hg.update(repo, revsymbol(repo, repo.topicProdBranch))):
       return 1
 
     # Merge from the topic branch
@@ -980,7 +1002,7 @@ def tpush(ui, repo, *args, **opts):
 
     # And return to the original topic branch
     if repo.dirstate.branch() != topicBranch:
-      if tryCommand(ui, "update %s" % quoteBranch(topicBranch), lambda:hg.update(repo, topicBranch)):
+      if tryCommand(ui, "update %s" % quoteBranch(topicBranch), lambda:hg.update(repo, revsymbol(repo, topicBranch))):
         return 1
 
   # For prod, push to the central repo as well as the servers.
@@ -996,7 +1018,7 @@ def tpush(ui, repo, *args, **opts):
          or "push creates new remote head" in str(e):
         print("Attempting to repair multiple heads.")
         if repo.dirstate.branch() != topicBranch:
-          if tryCommand(ui, "update %s" % quoteBranch(topicBranch), lambda:hg.update(repo, topicBranch)) > 1:
+          if tryCommand(ui, "update %s" % quoteBranch(topicBranch), lambda:hg.update(repo, revsymbol(repo, topicBranch))) > 1:
             return 1
         topicDir = os.path.dirname(__file__)
         repairScript = os.path.join(topicDir, "repair.py")
