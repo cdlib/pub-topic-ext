@@ -24,7 +24,7 @@ except ImportError:
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.4.7"
+topicVersion = "2.4.8"
 
 topicState = {}
 
