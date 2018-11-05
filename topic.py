@@ -24,7 +24,7 @@ except ImportError:
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.4.8"
+topicVersion = "2.4.9"
 
 topicState = {}
 
@@ -35,7 +35,7 @@ try:
   command = registrar.command(cmdtable)
   revsymbol = scmutil.revsymbol
   isbinary = util.stringutil.binary
-except ImportError:
+except:
   command = cmdutil.command(cmdtable)
   def revsymbol(repo, branch):
     return branch
