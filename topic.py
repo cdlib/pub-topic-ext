@@ -24,7 +24,7 @@ except ImportError:
 
 global origCalcChangectxAncestor
 
-topicVersion = "2.4.9"
+topicVersion = "2.4.10"
 
 topicState = {}
 
@@ -162,16 +162,16 @@ def validateChangegroup(ui, repo, hooktype, **opts):
   # If the committer knows what s/he is doing, allow this to go through without
   # any checks.
   #
-  for ctx in [repo[n] for n in range(int(repo[opts['node']]), len(repo))]:
+  for ctx in [repo[n] for n in range(repo[opts['node']].rev(), len(repo))]:
     if "NO_TOPIC_VALIDATE" in ctx.description():
       return 0 # no problems
 
   # Check each incoming commit to make sure it meets our rules
-  for ctx in [repo[n] for n in range(int(repo[opts['node']]), len(repo))]:
+  for ctx in [repo[n] for n in range(repo[opts['node']].rev(), len(repo))]:
     parents = ctx.parents()
     if len(parents) == 1:
       parents.append(None)
-    res = validateCommit(ui, repo, str(ctx), parents[0], parents[1])
+    res = validateCommit(ui, repo, ctx, parents[0], parents[1])
     if res:
       return res
 
@@ -190,7 +190,7 @@ def repushChangegroup(ui, repo, hooktype, **opts):
 
   # Figure out all the branches that were affected by the changesets.
   branchesChanged = set()
-  for ctx in [repo[n] for n in range(int(repo[opts['node']]), len(repo))]:
+  for ctx in [repo[n] for n in range(repo[opts['node']].rev(), len(repo))]:
     branchesChanged.add(ctx.branch())
 
   # Now check if any "repush-XYZ" config entries are present, where XYZ is
@@ -265,7 +265,7 @@ def autoUpdate(ui, repo, hooktype, **opts):
   # See if any of the changesets affects our current branch
   thisBranch = repo.dirstate.branch()
   needUpdate = False
-  for ctx in [repo[n] for n in range(int(repo[opts['node']]), len(repo))]:
+  for ctx in [repo[n] for n in range(repo[opts['node']].rev(), len(repo))]:
     if ctx.branch() == thisBranch:
       needUpdate = True
   
